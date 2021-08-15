@@ -1,0 +1,58 @@
+cabal-version:      2.4
+name:               hearts
+version:            1.0.0
+synopsis:           An implementation of the card game Hearts
+license:            GPL-3.0-or-later
+author:             Emily Bourke
+copyright:          Emily Bourke
+maintainer:         undergroundquizscene@protonmail.com
+
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+library
+  exposed-modules:
+      Hearts.Game
+      Hearts.Server
+  other-modules:
+      Hearts.API
+      Hearts.Card
+      Hearts.Game.Event
+      Hearts.Game.Player.Event
+      Hearts.Player
+      Hearts.Player.Id
+      Hearts.Room
+      Paths_hearts
+  hs-source-dirs:
+      src
+  build-depends:
+      aeson,
+      base,
+      bytestring,
+      containers,
+      generic-lens,
+      haskell-language-server,
+      lens,
+      random-shuffle,
+      servant,
+      servant-client,
+      servant-server,
+      text,
+      transformers,
+      vector,
+      wai-extra,
+      warp,
+  default-language: Haskell2010
+
+executable hearts-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_hearts
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base,
+      hearts,
+  default-language: Haskell2010
