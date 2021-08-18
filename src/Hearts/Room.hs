@@ -5,6 +5,7 @@
 module Hearts.Room (
   Room (..),
   Event (..),
+  FoldError (..),
   foldEvents,
   processEvent,
 ) where
@@ -53,3 +54,6 @@ processEvent Room{..} = \case
 data FoldError
   = IdNotInRoom
   | IdAlreadyTaken
+  deriving (Show, Generic)
+
+instance Aeson.ToJSON FoldError

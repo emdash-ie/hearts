@@ -1,6 +1,7 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# OPTIONS_GHC -Wno-deferred-type-errors #-}
 
 module Hearts.Server (runServer) where
 
@@ -11,9 +12,10 @@ import Hearts.Player.Id (Id (..))
 import Hearts.Room (Room (Room))
 import qualified Hearts.Room as Room
 
-import Control.Category ((>>>))
+import qualified Control.Monad as Monad
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
+import qualified Data.Aeson as Aeson
 import Data.Coerce (coerce)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
@@ -44,29 +46,46 @@ type AppM = ReaderT ServerState Handler
 
 data ServerState = ServerState
   { roomEvents :: TVar (Vector Room.Event)
-  , gameEvents :: TVar (Vector Game.Event)
+  , _gameEvents :: TVar (Vector Game.Event)
   }
 
 join :: AppM API.JoinResponse
 join = do
   roomVar <- asks roomEvents
-  liftIO $
-    atomically $ do
-      events <- readTVar roomVar
-      case Room.foldEvents Nothing events of
-        Left _ -> error "oh no"
-        Right room@Room{..} -> do
-          let assignedId = Id (maximum (Vector.cons 0 (coerce players)) + 1)
-          let joinEvent = Room.Join assignedId
-          writeTVar roomVar (Vector.snoc events joinEvent)
-          case Room.processEvent room joinEvent of
-            Left _ -> error "oh no again"
-            Right newRoom ->
-              pure
-                ( API.JoinResponse
-                    ( API.APIResponse
-                        { actions = Vector.empty
-                        , result = API.Join (JoinResult{room = newRoom, assignedId})
-                        }
-                    )
-                )
+  Monad.join $
+    liftIO $
+      atomically $ do
+        events <- readTVar roomVar
+        case Room.foldEvents Nothing events of
+          Left e ->
+            pure $
+              throwError
+                err500
+                  { errBody =
+                      "The room has an inconsistent state: "
+                        <> Aeson.encode e
+                  }
+          Right room@Room{..} -> do
+            let newId = Id (maximum (Vector.cons 0 (coerce players)) + 1)
+            let joinEvent = Room.Join newId
+            writeTVar roomVar (Vector.snoc events joinEvent)
+            pure (toResponse newId (Room.processEvent room joinEvent))
+  where
+    toResponse :: Id -> Either Room.FoldError Room -> AppM API.JoinResponse
+    toResponse assignedId = \case
+      Left e ->
+        throwError
+          err400
+            { errBody =
+                "You can't join this room, because: "
+                  <> Aeson.encode e
+            }
+      Right newRoom ->
+        pure
+          ( API.JoinResponse
+              ( API.APIResponse
+                  { actions = Vector.empty
+                  , result = API.Join (JoinResult{room = newRoom, assignedId})
+                  }
+              )
+          )
