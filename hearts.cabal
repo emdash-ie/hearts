@@ -31,7 +31,6 @@ library
       base,
       containers,
       generic-lens,
-      haskell-language-server,
       lens,
       random-shuffle,
       servant,
