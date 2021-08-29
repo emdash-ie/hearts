@@ -13,28 +13,23 @@
 
 module Hearts.Game (
   Event,
+  processEvent,
 ) where
 
-import Control.Lens (ASetter, ASetter', over, set, to, (%~), (.~), (^.))
+import Control.Lens (ASetter, ASetter', over, to, (%~), (.~), (^.))
+import Data.Foldable (toList)
 import Data.Function ((&))
 import Data.Generics.Product (field)
-import qualified Data.IntMap as Map
+import Data.Maybe (fromMaybe)
+import Data.Monoid (Sum (..))
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 
-import Data.Foldable (fold, toList)
-import Data.Functor (($>), (<&>))
-import Data.Functor.Identity (runIdentity)
-import Data.List (foldl', transpose, uncons, unfoldr)
-import Data.Maybe (fromMaybe, isJust, mapMaybe)
-import Data.Monoid (Sum (..))
 import Hearts.Card
 import qualified Hearts.Card as Card
 import Hearts.Game.Event
-import qualified Hearts.Game.Event as Event
-import qualified Hearts.Game.Player.Event as Player.Event
-import Hearts.Player (FourPlayers (..), Player, ThreePlayers (..))
+import Hearts.Player (FourPlayers (..), ThreePlayers (..))
 import qualified Hearts.Player as Player
 
 data Game = Game
@@ -69,9 +64,9 @@ processEvent (Just game) (Start event) = Left (GameAlreadyStarted game event)
 processEvent (Just game) (Deal (DealEvent (Deck deck))) =
   let updateHands = field @"hands" .~ Just (dealAmong4 deck)
    in Right (updateHands game)
-processEvent (Just game) (Play PlayEvent{..}) =
+processEvent (Just game) (Play PlayEvent{}) =
   let trickIsFinished :: FourPlayers (Maybe Card) -> Maybe (FourPlayers Card)
-      trickIsFinished = \trick@FourPlayers{..} ->
+      trickIsFinished = \FourPlayers{..} ->
         case (one, two, three, four) of
           (Just one', Just two', Just three', Just four') ->
             Just (FourPlayers{one = one', two = two', three = three', four = four'})
@@ -83,6 +78,7 @@ processEvent (Just game) (Play PlayEvent{..}) =
           ( g & field @"tricks" %~ fmap (fmap (flip Vector.snoc) trick <*>)
               & field @"trick" .~ Nothing
           )
+      handIsFinished :: Maybe (FourPlayers (Vector a)) -> Bool
       handIsFinished = maybe False \FourPlayers{..} ->
         all ((== 0) . Vector.length) [one, two, three, four]
       maybeScoreHand :: Game -> Game
@@ -105,10 +101,15 @@ dealAmong ::
 dealAmong setters xs = foldr ($) mempty zipped
   where
     zipped = zipWith prependTo (cycle setters) (toList xs)
+    prependTo ::
+      ASetter s t1 [a1] [a1] ->
+      a1 ->
+      s ->
+      t1
     prependTo s x = over s (x :)
 
-dealAmong3 :: Vector a -> ThreePlayers (Vector a)
-dealAmong3 =
+_dealAmong3 :: Vector a -> ThreePlayers (Vector a)
+_dealAmong3 =
   fmap Vector.fromList
     <$> dealAmong [field @"one", field @"two", field @"three"]
 

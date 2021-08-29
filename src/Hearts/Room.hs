@@ -14,7 +14,6 @@ import qualified Hearts.Player as Player
 
 import qualified Data.Aeson as Aeson
 import Data.Foldable (foldl')
-import Data.List (delete)
 import Data.Maybe (fromMaybe)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
@@ -37,7 +36,7 @@ foldEvents room = foldl' fold (Right (fromMaybe (Room Vector.empty) room))
       Either FoldError Room ->
       Event ->
       Either FoldError Room
-    fold (Right room) event = processEvent room event
+    fold (Right r) event = processEvent r event
     fold e@(Left _) _ = e
 
 processEvent :: Room -> Event -> Either FoldError Room

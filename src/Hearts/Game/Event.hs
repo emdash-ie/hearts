@@ -16,7 +16,7 @@ import System.Random.Shuffle (shuffleM)
 
 import Hearts.Card (Card)
 import qualified Hearts.Card as Card
-import Hearts.Player (FourPlayers, Player)
+import Hearts.Player (FourPlayers)
 import qualified Hearts.Player as Player
 
 data Event
