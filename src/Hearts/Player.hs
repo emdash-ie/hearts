@@ -1,7 +1,11 @@
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Hearts.Player (
@@ -11,17 +15,54 @@ module Hearts.Player (
   fourWith,
   ThreePlayers (..),
   PlayerData (..),
+  PlayerIndex (..),
+  getPlayerData,
+  takeFour,
+  findIndex,
 ) where
 
+import qualified Data.Aeson as Aeson
 import Data.Functor (($>))
+import Data.Vector (Vector, (!?))
 import GHC.Generics (Generic)
+
 import Hearts.Player.Id
 
 data Player = Player Id deriving (Show, Eq, Generic)
 
+data PlayerIndex
+  = PlayerOne
+  | PlayerTwo
+  | PlayerThree
+  | PlayerFour
+
+findIndex :: (a -> Bool) -> FourPlayers a -> Maybe PlayerIndex
+findIndex p FourPlayers{..} =
+  if
+      | p one -> Just PlayerOne
+      | p two -> Just PlayerTwo
+      | p three -> Just PlayerThree
+      | p four -> Just PlayerFour
+      | otherwise -> Nothing
+
+getPlayerData :: PlayerIndex -> FourPlayers a -> a
+getPlayerData = \case
+  PlayerOne -> one
+  PlayerTwo -> two
+  PlayerThree -> three
+  PlayerFour -> four
+
 data PlayerData a where
   Four :: FourPlayers a -> PlayerData a
   Three :: ThreePlayers a -> PlayerData a
+
+takeFour :: Vector a -> Maybe (FourPlayers a)
+takeFour xs = do
+  one <- xs !? 0
+  two <- xs !? 1
+  three <- xs !? 2
+  four <- xs !? 3
+  pure FourPlayers{..}
 
 data FourPlayers a = FourPlayers
   { one :: a
@@ -29,7 +70,7 @@ data FourPlayers a = FourPlayers
   , three :: a
   , four :: a
   }
-  deriving (Show, Eq, Functor, Generic)
+  deriving (Show, Eq, Functor, Foldable, Generic)
 
 instance Semigroup a => Semigroup (FourPlayers a) where
   FourPlayers{one = left1, two = left2, three = left3, four = left4}
@@ -54,6 +95,8 @@ instance Applicative FourPlayers where
         , three = left3 right3
         , four = left4 right4
         }
+
+instance Aeson.ToJSON a => Aeson.ToJSON (FourPlayers a)
 
 data ThreePlayers a = ThreePlayers
   { one :: a

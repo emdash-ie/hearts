@@ -8,3 +8,4 @@ import GHC.Generics (Generic)
 newtype Id = Id Integer deriving (Show, Eq, Generic)
 
 instance Aeson.ToJSON Id
+instance Aeson.FromJSON Id

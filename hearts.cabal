@@ -19,8 +19,8 @@ library
       Hearts.API
       Hearts.Card
       Hearts.Game.Event
-      Hearts.Game.Player.Event
       Hearts.Player
+      Hearts.Player.Event
       Hearts.Player.Id
       Hearts.Room
       Paths_hearts
@@ -37,6 +37,7 @@ library
       servant-server,
       text,
       transformers,
+      uuid,
       vector,
       wai-extra,
       warp,

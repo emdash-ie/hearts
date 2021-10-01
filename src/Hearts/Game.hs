@@ -14,6 +14,8 @@
 module Hearts.Game (
   Event,
   processEvent,
+  Game (..),
+  dealAmong4,
 ) where
 
 import Control.Lens (ASetter, ASetter', over, to, (%~), (.~), (^.))
@@ -117,15 +119,3 @@ dealAmong4 :: Vector a -> FourPlayers (Vector a)
 dealAmong4 =
   fmap Vector.fromList
     <$> dealAmong [field @"one", field @"two", field @"three", field @"four"]
-
--- makePlayerEvents ::
---   (Foldable f,
---    Applicative m,
---    Monoid (m Player.Event.Event)
---   ) =>
---   f Event ->
---   m Player.Event.Event
--- makePlayerEvents = foldr f undefined
---   where
---     f event acc = case event of
---       Start StartEvent{..} -> pure (Player.Event.Start Player.Event.StartEvent{..})

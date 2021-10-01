@@ -5,50 +5,36 @@
 
 module Hearts.API (
   HeartsAPI,
-  JoinResponse (..),
   APIResponse (..),
-  Result (..),
   JoinResult (..),
+  JoinResponse,
+  CreateResult (..),
+  CreateResponse,
 ) where
-
-import qualified Hearts.Player as Player
-import Hearts.Room (Room)
 
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
+import Data.UUID (UUID)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
 import Servant
 
+import qualified Hearts.Player as Player
+import Hearts.Player.Event (DealEvent, StartEvent)
+import Hearts.Room (Room)
+
 type HeartsAPI =
-  "join" :> Post '[JSON] JoinResponse
+  "join" :> Post '[JSON] (APIResponse JoinResult)
+    :<|> "game" :> ReqBody '[JSON] Player.Id
+      :> Post '[JSON] (APIResponse CreateResult)
 
-newtype JoinResponse = JoinResponse APIResponse
-  deriving (Generic)
-
-instance Aeson.ToJSON JoinResponse
-
-data APIResponse = APIResponse
-  { result :: Result
+data APIResponse result = APIResponse
+  { result :: result
   , actions :: Vector Action
   }
   deriving (Generic)
 
-instance Aeson.ToJSON APIResponse
-
-newtype Result
-  = Join JoinResult
-  deriving (Generic)
-
-instance Aeson.ToJSON Result
-
-data JoinResult = JoinResult
-  { room :: Room
-  , assignedId :: Player.Id
-  }
-  deriving (Generic)
-
-instance Aeson.ToJSON JoinResult
+instance Aeson.ToJSON result => Aeson.ToJSON (APIResponse result)
 
 data Action = Action
   { name :: Text
@@ -58,3 +44,24 @@ data Action = Action
   deriving (Generic)
 
 instance Aeson.ToJSON Action
+
+type JoinResponse = APIResponse JoinResult
+
+data JoinResult = JoinResult
+  { room :: Room
+  , assignedId :: Player.Id
+  }
+  deriving (Generic)
+
+instance Aeson.ToJSON JoinResult
+
+type CreateResponse = APIResponse CreateResult
+
+data CreateResult = CreateResult
+  { gameId :: UUID
+  , startEvent :: StartEvent
+  , dealEvent :: DealEvent
+  }
+  deriving (Generic)
+
+instance Aeson.ToJSON CreateResult

@@ -3,6 +3,7 @@
 
 module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards) where
 
+import qualified Data.Aeson as Aeson
 import Data.Monoid (Sum)
 import GHC.Generics (Generic)
 
@@ -64,6 +65,8 @@ instance Show Card where
     Card Hearts King -> "🂾"
     Card Hearts Ace -> "🂱"
 
+instance Aeson.ToJSON Card
+
 data Suit
   = Clubs
   | Diamonds
@@ -77,6 +80,8 @@ instance Show Suit where
     Diamonds -> "♦"
     Spades -> "♠"
     Hearts -> "♥"
+
+instance Aeson.ToJSON Suit
 
 data Value
   = Two
@@ -109,6 +114,8 @@ instance Show Value where
     Queen -> "Q"
     King -> "K"
     Ace -> "A"
+
+instance Aeson.ToJSON Value
 
 -- | The score taken for taking this card in a trick.
 score :: Card -> Sum Integer
