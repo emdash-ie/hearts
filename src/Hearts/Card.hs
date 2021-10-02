@@ -1,9 +1,10 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
 
-module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards) where
+module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards, sortCards) where
 
 import qualified Data.Aeson as Aeson
+import Data.List (sortOn)
 import Data.Monoid (Sum)
 import GHC.Generics (Generic)
 
@@ -72,7 +73,7 @@ data Suit
   | Diamonds
   | Spades
   | Hearts
-  deriving (Eq, Bounded, Enum, Generic)
+  deriving (Eq, Bounded, Enum, Ord, Generic)
 
 instance Show Suit where
   show = \case
@@ -97,7 +98,7 @@ data Value
   | Queen
   | King
   | Ace
-  deriving (Eq, Bounded, Enum, Generic)
+  deriving (Eq, Bounded, Enum, Ord, Generic)
 
 instance Show Value where
   show = \case
@@ -129,3 +130,9 @@ allCards =
   Card
     <$> [minBound .. maxBound]
     <*> [minBound .. maxBound]
+
+sortCards :: [Card] -> [Card]
+sortCards = sortOn suit . sortOn value
+  where
+    suit (Card s _) = s
+    value (Card _ v) = v

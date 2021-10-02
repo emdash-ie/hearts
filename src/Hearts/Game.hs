@@ -16,6 +16,7 @@ module Hearts.Game (
   processEvent,
   Game (..),
   dealAmong4,
+  sortHand,
 ) where
 
 import Control.Lens (ASetter, ASetter', over, to, (%~), (.~), (^.))
@@ -64,7 +65,7 @@ processEvent Nothing (Start StartEvent{..}) =
 processEvent Nothing event = Left (GameNotStarted event)
 processEvent (Just game) (Start event) = Left (GameAlreadyStarted game event)
 processEvent (Just game) (Deal (DealEvent (Deck deck))) =
-  let updateHands = field @"hands" .~ Just (dealAmong4 deck)
+  let updateHands = field @"hands" .~ Just (sortHand <$> dealAmong4 deck)
    in Right (updateHands game)
 processEvent (Just game) (Play PlayEvent{}) =
   let trickIsFinished :: FourPlayers (Maybe Card) -> Maybe (FourPlayers Card)
@@ -119,3 +120,6 @@ dealAmong4 :: Vector a -> FourPlayers (Vector a)
 dealAmong4 =
   fmap Vector.fromList
     <$> dealAmong [field @"one", field @"two", field @"three", field @"four"]
+
+sortHand :: Vector Card -> Vector Card
+sortHand = Vector.fromList . Card.sortCards . toList

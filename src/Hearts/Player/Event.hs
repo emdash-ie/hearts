@@ -48,7 +48,8 @@ fromGameStartEvent Game.StartEvent{..} = StartEvent{..}
 
 fromGameDealEvent :: Player.PlayerIndex -> Game.DealEvent -> DealEvent
 fromGameDealEvent playerIndex Game.DealEvent{deck = Game.Deck deck} =
-  let hand = Player.getPlayerData playerIndex (Game.dealAmong4 deck)
+  let hand =
+        Player.getPlayerData playerIndex (Game.sortHand <$> Game.dealAmong4 deck)
    in DealEvent{hand}
 
 fromGamePlayEvent ::
