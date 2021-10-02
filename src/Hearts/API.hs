@@ -10,6 +10,7 @@ module Hearts.API (
   JoinResponse,
   CreateResult (..),
   CreateResponse,
+  Action (..),
 ) where
 
 import qualified Data.Aeson as Aeson
@@ -25,7 +26,7 @@ import Hearts.Room (Room)
 
 type HeartsAPI =
   "join" :> Post '[JSON] (APIResponse JoinResult)
-    :<|> "game" :> ReqBody '[JSON] Player.Id
+    :<|> "game" :> QueryParam "id" Player.Id
       :> Post '[JSON] (APIResponse CreateResult)
 
 data APIResponse result = APIResponse

@@ -79,10 +79,10 @@ join = do
             let newId = Id (maximum (Vector.cons 0 (coerce players)) + 1)
             let joinEvent = Room.Join newId
             writeTVar roomVar (Vector.snoc events joinEvent)
-            pure (toResponse newId (Room.processEvent room joinEvent))
+            pure (toResponse players newId (Room.processEvent room joinEvent))
   where
-    toResponse :: Id -> Either Room.FoldError Room -> AppM API.JoinResponse
-    toResponse assignedId = \case
+    toResponse :: Vector Player.Id -> Id -> Either Room.FoldError Room -> AppM API.JoinResponse
+    toResponse players assignedId = \case
       Left e ->
         throwError
           err400
@@ -93,13 +93,23 @@ join = do
       Right newRoom ->
         pure
           ( API.APIResponse
-              { actions = Vector.empty
+              { actions =
+                  if Vector.length players >= 3
+                    then
+                      Vector.singleton
+                        ( API.Action
+                            { name = "Start game"
+                            , description = "Start a new game"
+                            , url = "game?id=" <> toQueryParam assignedId
+                            }
+                        )
+                    else Vector.empty
               , result = JoinResult{room = newRoom, assignedId}
               }
           )
 
-create :: Player.Id -> AppM API.CreateResponse
-create playerId = do
+create :: Maybe Player.Id -> AppM API.CreateResponse
+create (Just playerId) = do
   roomVar <- asks roomEvents
   gameVar <- asks gameEvents
   gameId <- liftIO UUID.nextRandom
@@ -155,3 +165,4 @@ create playerId = do
                       , result = API.CreateResult{..}
                       }
                   )
+create Nothing = throwError err400{errBody = "You must provide a player ID"}
