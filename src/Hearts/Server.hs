@@ -1,4 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -40,7 +41,9 @@ runServer = do
 
 server :: ServerT HeartsAPI AppM
 server =
-  join
+  root
+    :<|> join
+    :<|> roomEndpoint
     :<|> create
 
 heartsAPI :: Proxy HeartsAPI
@@ -59,7 +62,16 @@ data ServerState = ServerState
   , gameEvents :: TVar (Map UUID (Vector Game.Event))
   }
 
-join :: AppM API.JoinResponse
+root :: AppM (API.APIResponse API.RootResult)
+root =
+  pure
+    ( API.APIResponse
+        { result = API.RootResult ()
+        , actions = Vector.empty
+        }
+    )
+
+join :: AppM (API.WithLocation API.JoinResponse)
 join = do
   roomVar <- asks roomEvents
   Monad.join $
@@ -81,7 +93,11 @@ join = do
             writeTVar roomVar (Vector.snoc events joinEvent)
             pure (toResponse players newId (Room.processEvent room joinEvent))
   where
-    toResponse :: Vector Player.Id -> Id -> Either Room.FoldError Room -> AppM API.JoinResponse
+    toResponse ::
+      Vector Player.Id ->
+      Id ->
+      Either Room.FoldError Room ->
+      AppM (API.WithLocation API.JoinResponse)
     toResponse players assignedId = \case
       Left e ->
         throwError
@@ -92,21 +108,72 @@ join = do
             }
       Right newRoom ->
         pure
-          ( API.APIResponse
-              { actions =
-                  if Vector.length players >= 3
-                    then
-                      Vector.singleton
-                        ( API.Action
-                            { name = "Start game"
-                            , description = "Start a new game"
-                            , url = "game?id=" <> toQueryParam assignedId
-                            }
-                        )
-                    else Vector.empty
-              , result = JoinResult{room = newRoom, assignedId}
-              }
+          ( addHeader
+              ("room?playerId=" <> toQueryParam assignedId)
+              ( API.APIResponse
+                  { actions =
+                      if Vector.length players >= 3
+                        then
+                          Vector.singleton
+                            ( API.Action
+                                { name = "Start game"
+                                , description = "Start a new game"
+                                , url = "game?id=" <> toQueryParam assignedId
+                                , method = API.Post
+                                }
+                            )
+                        else Vector.empty
+                  , result = JoinResult{room = newRoom, assignedId}
+                  }
+              )
           )
+
+roomEndpoint :: Maybe Player.Id -> AppM API.JoinResponse
+roomEndpoint Nothing = throwError err400
+roomEndpoint (Just playerId) = do
+  roomVar <- asks roomEvents
+  Monad.join $
+    liftIO $
+      atomically $ do
+        events <- readTVar roomVar
+        case Room.foldEvents Nothing events of
+          Left e ->
+            pure $
+              throwError
+                err500
+                  { errBody =
+                      "The room has an inconsistent state: "
+                        <> Aeson.encode e
+                  }
+          Right room@Room{players} ->
+            pure
+              ( pure
+                  ( API.APIResponse
+                      { actions =
+                          let start =
+                                if Vector.length players >= 4
+                                  then
+                                    Vector.singleton
+                                      ( API.Action
+                                          { name = "Start game"
+                                          , description = "Start a new game"
+                                          , url = "game?playerId=" <> toQueryParam playerId
+                                          , method = API.Post
+                                          }
+                                      )
+                                  else Vector.empty
+                              refresh =
+                                API.Action
+                                  { name = "Check for updates"
+                                  , description = "Check for updates"
+                                  , url = "room?playerId=" <> toQueryParam playerId
+                                  , method = API.Get
+                                  }
+                           in Vector.cons refresh start
+                      , result = JoinResult{room, assignedId = playerId}
+                      }
+                  )
+              )
 
 create :: Maybe Player.Id -> AppM API.CreateResponse
 create (Just playerId) = do
