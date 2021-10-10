@@ -67,7 +67,15 @@ root =
   pure
     ( API.APIResponse
         { result = API.RootResult ()
-        , actions = Vector.empty
+        , actions =
+            Vector.singleton
+              ( API.Action
+                  { name = "Join room"
+                  , description = "Join room"
+                  , url = "join"
+                  , method = API.Post
+                  }
+              )
         }
     )
 

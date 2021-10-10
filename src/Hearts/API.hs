@@ -26,13 +26,12 @@ import Data.Text (Text)
 import Data.UUID (UUID)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lucid (ToHtml (..), action_, form_, input_, main_, method_, p_, type_, value_)
-import Lucid.Html5 (aside_)
+import Lucid (ToHtml (..), action_, form_, input_, main_, method_, nav_, p_, type_, value_)
 import Servant
 import Servant.HTML.Lucid (HTML)
 
 import qualified Hearts.Player as Player
-import Hearts.Player.Event (DealEvent, StartEvent)
+import Hearts.Player.Event (DealEvent (..), StartEvent (..))
 import Hearts.Room (Room (..))
 
 type HeartsAPI =
@@ -59,7 +58,7 @@ instance Aeson.ToJSON result => Aeson.ToJSON (APIResponse result)
 
 instance ToHtml result => ToHtml (APIResponse result) where
   toHtml APIResponse{actions, result} = do
-    aside_ (foldMap toHtml actions)
+    nav_ (foldMap toHtml actions)
     main_ (toHtml result)
   toHtmlRaw = toHtml
 
@@ -131,5 +130,13 @@ data CreateResult = CreateResult
 instance Aeson.ToJSON CreateResult
 
 instance ToHtml CreateResult where
-  toHtml CreateResult{} = mempty
+  toHtml
+    CreateResult
+      { gameId
+      , startEvent = StartEvent{players}
+      , dealEvent = DealEvent{hand}
+      } = do
+      p_ ("Created a game with ID: " <> toHtml (show gameId))
+      p_ ("The players in this game are: " <> toHtml (show players))
+      p_ ("Your hand is: " <> toHtml (show hand))
   toHtmlRaw = toHtml
