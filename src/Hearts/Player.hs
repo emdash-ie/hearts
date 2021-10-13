@@ -5,12 +5,14 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Hearts.Player (
   Player (..),
   Id (..),
+  Game (..),
   FourPlayers (..),
   fourWith,
   ThreePlayers (..),
@@ -21,12 +23,34 @@ module Hearts.Player (
   findIndex,
 ) where
 
+import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor (($>))
+import Data.Monoid (Sum (getSum))
 import Data.Vector (Vector, (!?))
 import GHC.Generics (Generic)
 
+import Hearts.Card (Card)
 import Hearts.Player.Id
+
+data Game = Game
+  { players :: FourPlayers Id
+  , scores :: FourPlayers (Sum Integer)
+  , hand :: Maybe (Vector Card)
+  , trick :: Maybe (FourPlayers (Maybe Card))
+  , tricks :: Maybe (FourPlayers (Vector Card))
+  }
+  deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON Game where
+  toJSON Game{..} =
+    Aeson.object
+      [ "players" .= players
+      , "scores" .= fmap getSum scores
+      , "hand" .= hand
+      , "trick" .= trick
+      , "tricks" .= tricks
+      ]
 
 data Player = Player Id deriving (Show, Eq, Generic)
 

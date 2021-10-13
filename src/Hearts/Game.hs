@@ -7,6 +7,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -17,10 +18,14 @@ module Hearts.Game (
   Game (..),
   dealAmong4,
   sortHand,
+  foldEvents,
+  toPlayerGame,
 ) where
 
 import Control.Lens (ASetter, ASetter', over, to, (%~), (.~), (^.))
-import Data.Foldable (toList)
+import Data.Aeson ((.=))
+import qualified Data.Aeson as Aeson
+import Data.Foldable (foldl', toList)
 import Data.Function ((&))
 import Data.Generics.Product (field)
 import Data.Maybe (fromMaybe)
@@ -44,13 +49,46 @@ data Game = Game
   }
   deriving (Show, Eq, Generic)
 
+instance Aeson.ToJSON Game where
+  toJSON Game{..} =
+    Aeson.object
+      [ "players" .= players
+      , "scores" .= fmap getSum scores
+      , "hands" .= hands
+      , "trick" .= trick
+      , "tricks" .= tricks
+      ]
+
+toPlayerGame :: Player.PlayerIndex -> Game -> Player.Game
+toPlayerGame index Game{..} =
+  Player.Game
+    { hand = Player.getPlayerData index <$> hands
+    , ..
+    }
+
 data FoldError
   = -- | This event (which isn't a 'Start') doesn't make sense, because the game
     -- has not yet started.
     GameNotStarted Event
   | -- | This 'Game' has already started, so this 'StartEvent' can't be applied.
     GameAlreadyStarted Game StartEvent
-  deriving (Show)
+  deriving (Show, Generic)
+
+instance Aeson.ToJSON FoldError
+
+foldEvents ::
+  Foldable f =>
+  Maybe Game ->
+  (Event, f Event) ->
+  Either FoldError Game
+foldEvents game (event, events) =
+  foldl' fold (processEvent game event) events
+  where
+    fold ::
+      Either FoldError Game ->
+      Event ->
+      Either FoldError Game
+    fold = either (const . Left) (processEvent . Just)
 
 processEvent :: Maybe Game -> Event -> Either FoldError Game
 processEvent Nothing (Start StartEvent{..}) =

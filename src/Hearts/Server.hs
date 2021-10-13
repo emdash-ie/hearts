@@ -3,6 +3,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Hearts.Server (runServer) where
@@ -18,11 +19,12 @@ import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import GHC.Conc (TVar, atomically, newTVarIO, readTVar, writeTVar)
+import GHC.Conc (STM, TVar, atomically, newTVarIO, readTVar, writeTVar)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
+import Data.Bifunctor (bimap, first)
 import Hearts.API (HeartsAPI, JoinResult (..))
 import qualified Hearts.API as API
 import qualified Hearts.Game as Game
@@ -45,6 +47,7 @@ server =
     :<|> join
     :<|> roomEndpoint
     :<|> create
+    :<|> gameEndpoint
 
 heartsAPI :: Proxy HeartsAPI
 heartsAPI = Proxy
@@ -82,162 +85,183 @@ root =
 join :: AppM (API.WithLocation API.JoinResponse)
 join = do
   roomVar <- asks roomEvents
-  Monad.join $
-    liftIO $
-      atomically $ do
-        events <- readTVar roomVar
-        case Room.foldEvents Nothing events of
-          Left e ->
-            pure $
-              throwError
-                err500
-                  { errBody =
-                      "The room has an inconsistent state: "
-                        <> Aeson.encode e
-                  }
-          Right room@Room{..} -> do
-            let newId = Id (maximum (Vector.cons 0 (coerce players)) + 1)
-            let joinEvent = Room.Join newId
-            writeTVar roomVar (Vector.snoc events joinEvent)
-            pure (toResponse players newId (Room.processEvent room joinEvent))
+  withRoom \room@Room{..} -> do
+    let newId = Id (maximum (Vector.cons 0 (coerce players)) + 1)
+    let joinEvent = Room.Join newId
+    events <- readTVar roomVar
+    writeTVar roomVar (Vector.snoc events joinEvent)
+    pure (bimap makeError (makeResponse players newId) (Room.processEvent room joinEvent))
   where
-    toResponse ::
+    makeResponse ::
       Vector Player.Id ->
       Id ->
-      Either Room.FoldError Room ->
-      AppM (API.WithLocation API.JoinResponse)
-    toResponse players assignedId = \case
-      Left e ->
-        throwError
-          err400
-            { errBody =
-                "You can't join this room, because: "
-                  <> Aeson.encode e
+      Room ->
+      API.WithLocation API.JoinResponse
+    makeResponse players assignedId newRoom =
+      addHeader
+        ("room?playerId=" <> toQueryParam assignedId)
+        ( API.APIResponse
+            { actions =
+                if Vector.length players >= 3
+                  then
+                    Vector.singleton
+                      ( API.Action
+                          { name = "Start game"
+                          , description = "Start a new game"
+                          , url = "game?id=" <> toQueryParam assignedId
+                          , method = API.Post
+                          }
+                      )
+                  else Vector.empty
+            , result = JoinResult{room = newRoom, assignedId}
             }
-      Right newRoom ->
-        pure
-          ( addHeader
-              ("room?playerId=" <> toQueryParam assignedId)
-              ( API.APIResponse
-                  { actions =
-                      if Vector.length players >= 3
+        )
+    makeError :: Aeson.ToJSON e => e -> ServerError
+    makeError e =
+      err400
+        { errBody =
+            "You can't join this room, because: "
+              <> Aeson.encode e
+        }
+
+roomEndpoint :: Maybe Player.Id -> AppM API.JoinResponse
+roomEndpoint Nothing = throwError err400
+roomEndpoint (Just playerId) = withRoom \room@Room{players} ->
+  pure
+    ( Right
+        ( API.APIResponse
+            { actions =
+                let start =
+                      if Vector.length players >= 4
                         then
                           Vector.singleton
                             ( API.Action
                                 { name = "Start game"
                                 , description = "Start a new game"
-                                , url = "game?id=" <> toQueryParam assignedId
+                                , url = "game?playerId=" <> toQueryParam playerId
                                 , method = API.Post
                                 }
                             )
                         else Vector.empty
-                  , result = JoinResult{room = newRoom, assignedId}
-                  }
-              )
-          )
+                    refresh =
+                      API.Action
+                        { name = "Check for updates"
+                        , description = "Check for updates"
+                        , url = "room?playerId=" <> toQueryParam playerId
+                        , method = API.Get
+                        }
+                 in Vector.cons refresh start
+            , result = JoinResult{room, assignedId = playerId}
+            }
+        )
+    )
 
-roomEndpoint :: Maybe Player.Id -> AppM API.JoinResponse
-roomEndpoint Nothing = throwError err400
-roomEndpoint (Just playerId) = do
-  roomVar <- asks roomEvents
-  Monad.join $
-    liftIO $
-      atomically $ do
-        events <- readTVar roomVar
-        case Room.foldEvents Nothing events of
-          Left e ->
-            pure $
-              throwError
-                err500
-                  { errBody =
-                      "The room has an inconsistent state: "
-                        <> Aeson.encode e
-                  }
-          Right room@Room{players} ->
-            pure
-              ( pure
-                  ( API.APIResponse
-                      { actions =
-                          let start =
-                                if Vector.length players >= 4
-                                  then
-                                    Vector.singleton
-                                      ( API.Action
-                                          { name = "Start game"
-                                          , description = "Start a new game"
-                                          , url = "game?playerId=" <> toQueryParam playerId
-                                          , method = API.Post
-                                          }
-                                      )
-                                  else Vector.empty
-                              refresh =
-                                API.Action
-                                  { name = "Check for updates"
-                                  , description = "Check for updates"
-                                  , url = "room?playerId=" <> toQueryParam playerId
-                                  , method = API.Get
-                                  }
-                           in Vector.cons refresh start
-                      , result = JoinResult{room, assignedId = playerId}
-                      }
-                  )
-              )
-
-create :: Maybe Player.Id -> AppM API.CreateResponse
+create :: Maybe Player.Id -> AppM (API.WithLocation API.CreateResponse)
 create (Just playerId) = do
   roomVar <- asks roomEvents
   gameVar <- asks gameEvents
   gameId <- liftIO UUID.nextRandom
   deck <- liftIO Event.shuffledDeck
-  Monad.join $
-    liftIO $ atomically do
-      roomEvents' <- readTVar roomVar
-      gameMap <- readTVar gameVar
-      case Room.foldEvents Nothing roomEvents' of
-        Left e ->
+  withRoom \Room{players} ->
+    case Player.takeFour players of
+      Nothing ->
+        pure $
+          Left $
+            err500
+              { errBody = "There aren’t enough players to start a game."
+              }
+      Just fourPlayers -> case Player.findIndex (== playerId) fourPlayers of
+        Nothing ->
           pure $
-            throwError
+            Left $
               err500
-                { errBody =
-                    "The room has an inconsistent state: "
-                      <> Aeson.encode e
+                { errBody = "Player ID not found."
                 }
-        Right Room{players} -> case Player.takeFour players of
-          Nothing ->
-            pure $
-              throwError
-                err500
-                  { errBody = "There aren’t enough players to start a game."
-                  }
-          Just fourPlayers -> case Player.findIndex (== playerId) fourPlayers of
-            Nothing ->
-              pure $
-                throwError
-                  err500
-                    { errBody = "Player ID not found."
+        Just playerIndex -> do
+          roomEvents' <- readTVar roomVar
+          gameMap <- readTVar gameVar
+          -- append the new room event
+          writeTVar roomVar (Vector.snoc roomEvents' (Room.StartGame gameId))
+          -- append the new game events
+          let gameStartEvent = Event.StartEvent fourPlayers
+          let gameStartEvent' = Event.Start gameStartEvent
+          let gameDealEvent = Event.DealEvent deck
+          let gameDealEvent' = Event.Deal gameDealEvent
+          let es =
+                Vector.fromList
+                  [ gameStartEvent'
+                  , gameDealEvent'
+                  ]
+          writeTVar gameVar (Map.insert gameId es gameMap)
+          -- return the create result
+          let startEvent = PlayerEvent.fromGameStartEvent gameStartEvent
+          let dealEvent = PlayerEvent.fromGameDealEvent playerIndex gameDealEvent
+          pure $
+            Right $
+              addHeader
+                ("game/" <> toQueryParam gameId)
+                ( API.APIResponse
+                    { actions = Vector.empty
+                    , result = API.CreateResult{..}
                     }
-            Just playerIndex -> do
-              -- append the new room event
-              writeTVar roomVar (Vector.snoc roomEvents' (Room.StartGame gameId))
-              -- append the new game events
-              let gameStartEvent = Event.StartEvent fourPlayers
-              let gameStartEvent' = Event.Start gameStartEvent
-              let gameDealEvent = Event.DealEvent deck
-              let gameDealEvent' = Event.Deal gameDealEvent
-              let es =
-                    Vector.fromList
-                      [ gameStartEvent'
-                      , gameDealEvent'
-                      ]
-              writeTVar gameVar (Map.insert gameId es gameMap)
-              -- return the create result
-              let startEvent = PlayerEvent.fromGameStartEvent gameStartEvent
-              let dealEvent = PlayerEvent.fromGameDealEvent playerIndex gameDealEvent
-              pure $
-                pure
-                  ( API.APIResponse
-                      { actions = Vector.empty
-                      , result = API.CreateResult{..}
-                      }
-                  )
+                )
 create Nothing = throwError err400{errBody = "You must provide a player ID"}
+
+gameEndpoint :: Maybe Player.Id -> UUID -> AppM (API.APIResponse API.GameResult)
+gameEndpoint (Just playerId) gameId = do
+  gameVar <- asks gameEvents
+  withRoom \Room{players} ->
+    case Player.takeFour players >>= Player.findIndex (== playerId) of
+      Nothing ->
+        pure $
+          Left
+            err500
+              { errBody = "Player ID not found."
+              }
+      Just playerIndex -> do
+        gameMap <- readTVar gameVar
+        case Map.lookup gameId gameMap >>= Vector.uncons of
+          Nothing -> pure (Left err404)
+          Just gameEvents ->
+            case Game.foldEvents Nothing gameEvents of
+              Left e ->
+                pure
+                  ( Left
+                      err500
+                        { errBody =
+                            "This game is in an inconsistent state: "
+                              <> Aeson.encode e
+                        }
+                  )
+              Right game ->
+                pure $
+                  Right
+                    ( API.APIResponse
+                        { actions = Vector.empty
+                        , result =
+                            API.GameResult
+                              { gameId
+                              , game = Game.toPlayerGame playerIndex game
+                              }
+                        }
+                    )
+gameEndpoint Nothing _ = throwError err400{errBody = "You must provide a player ID"}
+
+withRoom :: (Room -> STM (Either ServerError a)) -> AppM a
+withRoom useRoom = do
+  roomVar <- asks roomEvents
+  result <- liftIO $ atomically do
+    roomEvents' <- readTVar roomVar
+    Monad.join
+      <$> traverse
+        useRoom
+        (first roomError (Room.foldEvents Nothing roomEvents'))
+  either throwError pure result
+  where
+    roomError :: Aeson.ToJSON e => e -> ServerError
+    roomError e =
+      err500
+        { errBody =
+            "The room has an inconsistent state: "
+              <> Aeson.encode e
+        }

@@ -44,8 +44,7 @@ foldEvents room = foldl' fold (Right (fromMaybe (Room Vector.empty Vector.empty)
       Either FoldError Room ->
       Event ->
       Either FoldError Room
-    fold (Right r) event = processEvent r event
-    fold e@(Left _) _ = e
+    fold = either (const . Left) processEvent
 
 processEvent :: Room -> Event -> Either FoldError Room
 processEvent room@Room{..} = \case

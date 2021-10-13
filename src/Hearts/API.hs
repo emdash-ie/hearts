@@ -1,6 +1,7 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -16,6 +17,7 @@ module Hearts.API (
   JoinResponse,
   CreateResult (..),
   CreateResponse,
+  GameResult (..),
   Action (..),
   Method (..),
   WithLocation,
@@ -26,7 +28,7 @@ import Data.Text (Text)
 import Data.UUID (UUID)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lucid (ToHtml (..), action_, form_, input_, main_, method_, nav_, p_, type_, value_)
+import Lucid (ToHtml (..), action_, form_, h1_, input_, main_, method_, nav_, p_, type_, value_)
 import Servant
 import Servant.HTML.Lucid (HTML)
 
@@ -40,8 +42,13 @@ type HeartsAPI =
       :> PostRedirectGet '[JSON, HTML] (APIResponse JoinResult)
     :<|> "room" :> QueryParam "playerId" Player.Id
       :> Get '[JSON, HTML] (APIResponse JoinResult)
-    :<|> "game" :> QueryParam "playerId" Player.Id
-      :> Post '[JSON, HTML] (APIResponse CreateResult)
+    :<|> "game"
+      :> ( QueryParam "playerId" Player.Id
+            :> PostRedirectGet '[JSON, HTML] (APIResponse CreateResult)
+            :<|> QueryParam "playerId" Player.Id
+              :> Capture "gameId" UUID
+              :> Get '[JSON, HTML] (APIResponse GameResult)
+         )
 
 type PostRedirectGet contentTypes a =
   Verb 'POST 303 contentTypes (WithLocation a)
@@ -138,5 +145,25 @@ instance ToHtml CreateResult where
       } = do
       p_ ("Created a game with ID: " <> toHtml (show gameId))
       p_ ("The players in this game are: " <> toHtml (show players))
+      p_ ("Your hand is: " <> toHtml (show hand))
+  toHtmlRaw = toHtml
+
+data GameResult = GameResult
+  { gameId :: UUID
+  , game :: Player.Game
+  }
+  deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON GameResult
+
+instance ToHtml GameResult where
+  toHtml
+    GameResult
+      { gameId
+      , game = Player.Game{players, hand, scores}
+      } = do
+      h1_ ("Game " <> toHtml (show gameId))
+      p_ ("The players in this game are: " <> toHtml (show players))
+      p_ ("The scores are: " <> toHtml (show scores))
       p_ ("Your hand is: " <> toHtml (show hand))
   toHtmlRaw = toHtml
