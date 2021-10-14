@@ -36,6 +36,7 @@ import Lucid (
   action_,
   form_,
   h1_,
+  h2_,
   href_,
   input_,
   li_,
@@ -203,5 +204,6 @@ instance ToHtml GameResult where
       h1_ ("Game " <> toHtml (show gameId))
       p_ ("The players in this game are: " <> toHtml (show players))
       p_ ("The scores are: " <> toHtml (show scores))
-      p_ ("Your hand is: " <> toHtml (show hand))
+      h2_ "Your hand"
+      foldMap (foldMap toHtml) hand
   toHtmlRaw = toHtml

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards, sortCards) where
 
@@ -7,6 +8,7 @@ import qualified Data.Aeson as Aeson
 import Data.List (sortOn)
 import Data.Monoid (Sum)
 import GHC.Generics (Generic)
+import Lucid (ToHtml (..), span_, style_)
 
 data Card = Card Suit Value
   deriving (Eq, Generic)
@@ -67,6 +69,18 @@ instance Show Card where
     Card Hearts Ace -> "🂱"
 
 instance Aeson.ToJSON Card
+
+instance ToHtml Card where
+  toHtml c@(Card suit _) =
+    let size = "font-size: 100px;"
+        colour =
+          "color: " <> case suit of
+            Clubs -> "black"
+            Spades -> "black"
+            Diamonds -> "red"
+            Hearts -> "red"
+     in span_ [style_ (size <> colour)] (toHtml (show c))
+  toHtmlRaw = toHtml
 
 data Suit
   = Clubs
