@@ -24,22 +24,28 @@ module Hearts.API (
 ) where
 
 import qualified Data.Aeson as Aeson
+import Data.Coerce (coerce)
 import Data.Text (Text)
+import qualified Data.Text as Text
 import Data.UUID (UUID)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
 import Lucid (
   ToHtml (..),
+  a_,
   action_,
   form_,
   h1_,
+  href_,
   input_,
+  li_,
   main_,
   method_,
   name_,
   nav_,
   p_,
   type_,
+  ul_,
   value_,
  )
 import Servant
@@ -145,7 +151,16 @@ instance ToHtml JoinResult where
   toHtml JoinResult{room = Room{players, games}, assignedId} = do
     p_ ("Your assigned ID is: " <> toHtml (show assignedId))
     p_ ("The players in this room are: " <> toHtml (show players))
-    p_ ("The games in this room so far are: " <> toHtml (show games))
+    p_ "The games in this room so far are:"
+    ul_ do
+      foldMap (\g -> li_ (a_ [href_ (gameHref g)] (toHtml (show g)))) games
+    where
+      gameHref :: UUID -> Text
+      gameHref g =
+        "game/" <> Text.pack (show g)
+          <> "?playerId="
+          <> Text.pack (show (coerce assignedId :: Integer))
+
   toHtmlRaw = toHtml
 
 type CreateResponse = APIResponse CreateResult
