@@ -28,7 +28,20 @@ import Data.Text (Text)
 import Data.UUID (UUID)
 import Data.Vector (Vector)
 import GHC.Generics (Generic)
-import Lucid (ToHtml (..), action_, form_, h1_, input_, main_, method_, nav_, p_, type_, value_)
+import Lucid (
+  ToHtml (..),
+  action_,
+  form_,
+  h1_,
+  input_,
+  main_,
+  method_,
+  name_,
+  nav_,
+  p_,
+  type_,
+  value_,
+ )
 import Servant
 import Servant.HTML.Lucid (HTML)
 
@@ -74,22 +87,32 @@ data Action = Action
   , description :: Text
   , url :: Text
   , method :: Method
+  , parameters :: [(Text, Text)]
   }
   deriving (Generic)
 
 instance Aeson.ToJSON Action
 
 instance ToHtml Action where
-  toHtml Action{name, url, method} =
+  toHtml Action{name, url, method, parameters} =
     form_
-      [ action_ url
+      [ action_
+          ( case method of
+              Get -> url
+              Post -> url <> "?" <> foldMap (\(k, v) -> k <> "=" <> v <> "&") parameters
+          )
       , method_
           ( case method of
               Get -> "get"
               Post -> "post"
           )
       ]
-      (input_ [type_ "submit", value_ name])
+      ( input_ [type_ "submit", value_ name]
+          <> ( case method of
+                Get -> foldMap (\(k, v) -> input_ [type_ "hidden", name_ k, value_ v]) parameters
+                Post -> mempty
+             )
+      )
   toHtmlRaw = toHtml
 
 data Method

@@ -77,6 +77,7 @@ root =
                   , description = "Join room"
                   , url = "join"
                   , method = API.Post
+                  , parameters = []
                   }
               )
         }
@@ -108,8 +109,9 @@ join = do
                       ( API.Action
                           { name = "Start game"
                           , description = "Start a new game"
-                          , url = "game?id=" <> toQueryParam assignedId
+                          , url = "game"
                           , method = API.Post
+                          , parameters = [("id", toQueryParam assignedId)]
                           }
                       )
                   else Vector.empty
@@ -138,8 +140,9 @@ roomEndpoint (Just playerId) = withRoom \room@Room{players} ->
                             ( API.Action
                                 { name = "Start game"
                                 , description = "Start a new game"
-                                , url = "game?playerId=" <> toQueryParam playerId
+                                , url = "game"
                                 , method = API.Post
+                                , parameters = [("playerId", toQueryParam playerId)]
                                 }
                             )
                         else Vector.empty
@@ -147,8 +150,9 @@ roomEndpoint (Just playerId) = withRoom \room@Room{players} ->
                       API.Action
                         { name = "Check for updates"
                         , description = "Check for updates"
-                        , url = "room?playerId=" <> toQueryParam playerId
+                        , url = "room"
                         , method = API.Get
+                        , parameters = [("playerId", toQueryParam playerId)]
                         }
                  in Vector.cons refresh start
             , result = JoinResult{room, assignedId = playerId}
@@ -199,7 +203,10 @@ create (Just playerId) = do
           pure $
             Right $
               addHeader
-                ("game/" <> toQueryParam gameId)
+                ( "game/" <> toQueryParam gameId
+                    <> "?playerId="
+                    <> toQueryParam playerId
+                )
                 ( API.APIResponse
                     { actions = Vector.empty
                     , result = API.CreateResult{..}
