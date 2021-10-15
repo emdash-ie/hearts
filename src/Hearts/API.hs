@@ -204,6 +204,6 @@ instance ToHtml GameResult where
       h1_ ("Game " <> toHtml (show gameId))
       p_ ("The players in this game are: " <> toHtml (show players))
       p_ ("The scores are: " <> toHtml (show scores))
-      h2_ "Your hand"
+      h2_ "Your hand:"
       foldMap (foldMap toHtml) hand
   toHtmlRaw = toHtml
