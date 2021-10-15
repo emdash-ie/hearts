@@ -77,8 +77,8 @@ instance ToHtml Card where
           "color: " <> case suit of
             Clubs -> "black"
             Spades -> "black"
-            Diamonds -> "red"
-            Hearts -> "red"
+            Diamonds -> "crimson"
+            Hearts -> "crimson"
      in span_ [style_ (size <> colour)] (toHtml (show c))
   toHtmlRaw = toHtml
 
