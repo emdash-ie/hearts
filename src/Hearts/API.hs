@@ -25,6 +25,7 @@ module Hearts.API (
 
 import qualified Data.Aeson as Aeson
 import Data.Coerce (coerce)
+import Data.Monoid (Sum (..))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
@@ -45,6 +46,12 @@ import Lucid (
   name_,
   nav_,
   p_,
+  table_,
+  tbody_,
+  td_,
+  th_,
+  thead_,
+  tr_,
   type_,
   ul_,
   value_,
@@ -202,8 +209,31 @@ instance ToHtml GameResult where
       , game = Player.Game{players, hand, scores}
       } = do
       h1_ ("Game " <> toHtml (show gameId))
-      p_ ("The players in this game are: " <> toHtml (show players))
-      p_ ("The scores are: " <> toHtml (show scores))
+      p_ "The players in this game are:"
+      toHtml (PlayerList players)
+      h2_ "Scores:"
+      toHtml (ScoreTable ((,) <$> players <*> scores))
       h2_ "Your hand:"
       foldMap (foldMap toHtml) hand
+  toHtmlRaw = toHtml
+
+newtype PlayerList = PlayerList (Player.FourPlayers Player.Id)
+
+instance ToHtml PlayerList where
+  toHtml (PlayerList Player.FourPlayers{one, two, three, four}) =
+    ul_
+      ( foldMap
+          (\(Player.Id i) -> li_ (toHtml (show i)))
+          [one, two, three, four]
+      )
+  toHtmlRaw = toHtml
+
+newtype ScoreTable = ScoreTable (Player.FourPlayers (Player.Id, Sum Integer))
+
+instance ToHtml ScoreTable where
+  toHtml (ScoreTable Player.FourPlayers{one, two, three, four}) =
+    table_ do
+      let ps = [one, two, three, four]
+      thead_ (tr_ (foldMap (\(Player.Id i, _) -> th_ (toHtml (show i))) ps))
+      tbody_ (tr_ (foldMap (\(_, Sum s) -> td_ (toHtml (show s))) ps))
   toHtmlRaw = toHtml
