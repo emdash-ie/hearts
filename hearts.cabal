@@ -31,6 +31,7 @@ library
       base,
       containers,
       generic-lens,
+      http-api-data,
       lens,
       lucid,
       random-shuffle,

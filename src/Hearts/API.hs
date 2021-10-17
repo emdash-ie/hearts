@@ -13,6 +13,7 @@ module Hearts.API (
   HeartsAPI,
   APIResponse (..),
   RootResult (..),
+  JoinRequest (..),
   JoinResult (..),
   JoinResponse,
   CreateResult (..),
@@ -20,10 +21,12 @@ module Hearts.API (
   GameResult (..),
   Action (..),
   Method (..),
+  Input (..),
   WithLocation,
 ) where
 
 import qualified Data.Aeson as Aeson
+import Data.Bool (bool)
 import Data.Coerce (coerce)
 import Data.Monoid (Sum (..))
 import Data.Text (Text)
@@ -35,17 +38,21 @@ import Lucid (
   ToHtml (..),
   a_,
   action_,
+  for_,
   form_,
   h1_,
   h2_,
   href_,
+  id_,
   input_,
+  label_,
   li_,
   main_,
   method_,
   name_,
   nav_,
   p_,
+  required_,
   table_,
   tbody_,
   td_,
@@ -56,9 +63,11 @@ import Lucid (
   ul_,
   value_,
  )
-import Servant
+import Servant hiding (Required)
 import Servant.HTML.Lucid (HTML)
+import Web.FormUrlEncoded (FromForm)
 
+import Hearts.Player (Player (Player))
 import qualified Hearts.Player as Player
 import Hearts.Player.Event (DealEvent (..), StartEvent (..))
 import Hearts.Room (Room (..))
@@ -66,6 +75,7 @@ import Hearts.Room (Room (..))
 type HeartsAPI =
   Get '[JSON, HTML] (APIResponse RootResult)
     :<|> "join"
+      :> ReqBody '[JSON, FormUrlEncoded] JoinRequest
       :> PostRedirectGet '[JSON, HTML] (APIResponse JoinResult)
     :<|> "room" :> QueryParam "playerId" Player.Id
       :> Get '[JSON, HTML] (APIResponse JoinResult)
@@ -102,13 +112,14 @@ data Action = Action
   , url :: Text
   , method :: Method
   , parameters :: [(Text, Text)]
+  , inputs :: [Input]
   }
   deriving (Generic)
 
 instance Aeson.ToJSON Action
 
 instance ToHtml Action where
-  toHtml Action{name, url, method, parameters} =
+  toHtml Action{name, url, method, parameters, inputs} =
     form_
       [ action_
           ( case method of
@@ -126,6 +137,7 @@ instance ToHtml Action where
                 Get -> foldMap (\(k, v) -> input_ [type_ "hidden", name_ k, value_ v]) parameters
                 Post -> mempty
              )
+          <> foldMap toHtml inputs
       )
   toHtmlRaw = toHtml
 
@@ -136,6 +148,28 @@ data Method
 
 instance Aeson.ToJSON Method
 
+data Input
+  = TextInput Name Label Required
+  deriving (Show, Eq, Generic)
+
+type Name = Text
+type Label = Text
+type Required = Bool
+
+instance Aeson.ToJSON Input
+
+instance ToHtml Input where
+  toHtml (TextInput name label required) = do
+    label_ [for_ name] (toHtml label)
+    input_
+      [ type_ "text"
+      , name_ name
+      , id_ name
+      , required_ (bool "false" "true" required)
+      ]
+
+  toHtmlRaw = toHtml
+
 newtype RootResult = RootResult ()
   deriving (Generic)
 
@@ -144,6 +178,15 @@ instance Aeson.ToJSON RootResult
 instance ToHtml RootResult where
   toHtml _ = mempty
   toHtmlRaw = toHtml
+
+newtype JoinRequest = JoinRequest
+  { username :: Text
+  }
+  deriving (Show, Eq, Generic)
+
+instance Aeson.FromJSON JoinRequest
+
+instance FromForm JoinRequest
 
 type JoinResponse = APIResponse JoinResult
 
@@ -196,6 +239,7 @@ instance ToHtml CreateResult where
 
 data GameResult = GameResult
   { gameId :: UUID
+  , usernames :: Player.FourPlayers Text
   , game :: Player.Game
   }
   deriving (Show, Eq, Generic)
@@ -206,34 +250,36 @@ instance ToHtml GameResult where
   toHtml
     GameResult
       { gameId
+      , usernames
       , game = Player.Game{players, hand, scores}
       } = do
+      let ps = Player <$> players <*> usernames
       h1_ ("Game " <> toHtml (show gameId))
       p_ "The players in this game are:"
-      toHtml (PlayerList players)
+      toHtml (PlayerList ps)
       h2_ "Scores:"
-      toHtml (ScoreTable ((,) <$> players <*> scores))
+      toHtml (ScoreTable ((,) <$> ps <*> scores))
       h2_ "Your hand:"
       foldMap (foldMap toHtml) hand
   toHtmlRaw = toHtml
 
-newtype PlayerList = PlayerList (Player.FourPlayers Player.Id)
+newtype PlayerList = PlayerList (Player.FourPlayers Player)
 
 instance ToHtml PlayerList where
   toHtml (PlayerList Player.FourPlayers{one, two, three, four}) =
     ul_
       ( foldMap
-          (\(Player.Id i) -> li_ (toHtml (show i)))
+          (li_ . toHtml . Player.username)
           [one, two, three, four]
       )
   toHtmlRaw = toHtml
 
-newtype ScoreTable = ScoreTable (Player.FourPlayers (Player.Id, Sum Integer))
+newtype ScoreTable = ScoreTable (Player.FourPlayers (Player, Sum Integer))
 
 instance ToHtml ScoreTable where
   toHtml (ScoreTable Player.FourPlayers{one, two, three, four}) =
     table_ do
       let ps = [one, two, three, four]
-      thead_ (tr_ (foldMap (\(Player.Id i, _) -> th_ (toHtml (show i))) ps))
+      thead_ (tr_ (foldMap (\(p, _) -> th_ (toHtml (Player.username p))) ps))
       tbody_ (tr_ (foldMap (\(_, Sum s) -> td_ (toHtml (show s))) ps))
   toHtmlRaw = toHtml

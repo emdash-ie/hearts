@@ -27,6 +27,7 @@ import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor (($>))
 import Data.Monoid (Sum (getSum))
+import Data.Text (Text)
 import Data.Vector (Vector, (!?))
 import GHC.Generics (Generic)
 
@@ -52,7 +53,15 @@ instance Aeson.ToJSON Game where
       , "tricks" .= tricks
       ]
 
-data Player = Player Id deriving (Show, Eq, Generic)
+data Player = Player
+  { id :: Id
+  , username :: Username
+  }
+  deriving (Show, Eq, Generic)
+
+type Username = Text
+
+instance Aeson.ToJSON Player
 
 data PlayerIndex
   = PlayerOne

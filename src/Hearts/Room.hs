@@ -17,15 +17,17 @@ import qualified Data.Aeson as Aeson
 import Data.Foldable (foldl')
 import Data.Generics.Product (field)
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
 import Data.UUID (UUID)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 
+import Hearts.Player (Player (Player))
 import qualified Hearts.Player as Player
 
 data Room = Room
-  { players :: Vector Player.Id
+  { players :: Vector Player
   , games :: Vector UUID
   }
   deriving (Generic)
@@ -33,9 +35,11 @@ data Room = Room
 instance Aeson.ToJSON Room
 
 data Event
-  = Join Player.Id
+  = Join Player.Id Username
   | Leave Player.Id
   | StartGame UUID
+
+type Username = Text
 
 foldEvents :: Foldable f => Maybe Room -> f Event -> Either FoldError Room
 foldEvents room = foldl' fold (Right (fromMaybe (Room Vector.empty Vector.empty) room))
@@ -48,13 +52,13 @@ foldEvents room = foldl' fold (Right (fromMaybe (Room Vector.empty Vector.empty)
 
 processEvent :: Room -> Event -> Either FoldError Room
 processEvent room@Room{..} = \case
-  Join newPlayer ->
-    if newPlayer `elem` players
+  Join newId username ->
+    if newId `elem` (Player.id <$> players)
       then Left IdAlreadyTaken
-      else Right (Room{players = Vector.snoc players newPlayer, ..})
+      else Right (Room{players = Vector.snoc players (Player newId username), ..})
   Leave player ->
-    if player `elem` players
-      then Right (Room{players = Vector.filter (/= player) players, ..})
+    if player `elem` (Player.id <$> players)
+      then Right (Room{players = Vector.filter ((/= player) . Player.id) players, ..})
       else Left IdNotInRoom
   StartGame gameId ->
     Right (over (field @"games") (`Vector.snoc` gameId) room)
