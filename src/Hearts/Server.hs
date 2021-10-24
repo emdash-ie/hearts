@@ -44,6 +44,7 @@ runServer = do
 server :: ServerT HeartsAPI AppM
 server =
   root
+    :<|> serveDirectoryWebApp "static"
     :<|> join
     :<|> roomEndpoint
     :<|> create

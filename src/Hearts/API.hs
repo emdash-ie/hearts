@@ -38,6 +38,7 @@ import Lucid (
   ToHtml (..),
   a_,
   action_,
+  fieldset_,
   for_,
   form_,
   h1_,
@@ -47,11 +48,13 @@ import Lucid (
   input_,
   label_,
   li_,
+  link_,
   main_,
   method_,
   name_,
   nav_,
   p_,
+  rel_,
   required_,
   table_,
   tbody_,
@@ -74,6 +77,7 @@ import Hearts.Room (Room (..))
 
 type HeartsAPI =
   Get '[JSON, HTML] (APIResponse RootResult)
+    :<|> "static" :> Raw
     :<|> "join"
       :> ReqBody '[JSON, FormUrlEncoded] JoinRequest
       :> PostRedirectGet '[JSON, HTML] (APIResponse JoinResult)
@@ -102,8 +106,9 @@ instance Aeson.ToJSON result => Aeson.ToJSON (APIResponse result)
 
 instance ToHtml result => ToHtml (APIResponse result) where
   toHtml APIResponse{actions, result} = do
-    nav_ (foldMap toHtml actions)
+    link_ [rel_ "stylesheet", href_ "static/hearts.css", type_ "text/css"]
     main_ (toHtml result)
+    nav_ (foldMap toHtml actions)
   toHtmlRaw = toHtml
 
 data Action = Action
@@ -132,12 +137,12 @@ instance ToHtml Action where
               Post -> "post"
           )
       ]
-      ( input_ [type_ "submit", value_ name]
-          <> ( case method of
-                Get -> foldMap (\(k, v) -> input_ [type_ "hidden", name_ k, value_ v]) parameters
-                Post -> mempty
-             )
+      ( ( case method of
+            Get -> foldMap (\(k, v) -> input_ [type_ "hidden", name_ k, value_ v]) parameters
+            Post -> mempty
+        )
           <> foldMap toHtml inputs
+          <> input_ [type_ "submit", value_ name]
       )
   toHtmlRaw = toHtml
 
@@ -159,7 +164,7 @@ type Required = Bool
 instance Aeson.ToJSON Input
 
 instance ToHtml Input where
-  toHtml (TextInput name label required) = do
+  toHtml (TextInput name label required) = fieldset_ do
     label_ [for_ name] (toHtml label)
     input_
       [ type_ "text"
@@ -176,7 +181,7 @@ newtype RootResult = RootResult ()
 instance Aeson.ToJSON RootResult
 
 instance ToHtml RootResult where
-  toHtml _ = mempty
+  toHtml _ = p_ "Welcome to the Hearts server!"
   toHtmlRaw = toHtml
 
 newtype JoinRequest = JoinRequest
@@ -258,7 +263,7 @@ instance ToHtml GameResult where
       p_ "The players in this game are:"
       toHtml (PlayerList ps)
       h2_ "Scores:"
-      toHtml (ScoreTable ((,) <$> ps <*> scores))
+      toHtml (ScoreTable ((,) <$> usernames <*> scores))
       h2_ "Your hand:"
       foldMap (foldMap toHtml) hand
   toHtmlRaw = toHtml
@@ -274,12 +279,12 @@ instance ToHtml PlayerList where
       )
   toHtmlRaw = toHtml
 
-newtype ScoreTable = ScoreTable (Player.FourPlayers (Player, Sum Integer))
+newtype ScoreTable = ScoreTable (Player.FourPlayers (Text, Sum Integer))
 
 instance ToHtml ScoreTable where
   toHtml (ScoreTable Player.FourPlayers{one, two, three, four}) =
     table_ do
       let ps = [one, two, three, four]
-      thead_ (tr_ (foldMap (\(p, _) -> th_ (toHtml (Player.username p))) ps))
-      tbody_ (tr_ (foldMap (\(_, Sum s) -> td_ (toHtml (show s))) ps))
+      thead_ (tr_ (foldMap (th_ . toHtml . fst) ps))
+      tbody_ (tr_ (foldMap (td_ . toHtml . show . getSum . snd) ps))
   toHtmlRaw = toHtml
