@@ -19,6 +19,7 @@ module Hearts.API (
   CreateResult (..),
   CreateResponse,
   GameResult (..),
+  PlayResult (..),
   Action (..),
   Method (..),
   Input (..),
@@ -70,6 +71,7 @@ import Servant hiding (Required)
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm)
 
+import Hearts.Card (Card)
 import Hearts.Player (Player (Player))
 import qualified Hearts.Player as Player
 import Hearts.Player.Event (DealEvent (..), StartEvent (..))
@@ -83,13 +85,19 @@ type HeartsAPI =
       :> PostRedirectGet '[JSON, HTML] (APIResponse JoinResult)
     :<|> "room" :> QueryParam "playerId" Player.Id
       :> Get '[JSON, HTML] (APIResponse JoinResult)
-    :<|> "game"
-      :> ( QueryParam "playerId" Player.Id
-            :> PostRedirectGet '[JSON, HTML] (APIResponse CreateResult)
-            :<|> QueryParam "playerId" Player.Id
-              :> Capture "gameId" UUID
-              :> Get '[JSON, HTML] (APIResponse GameResult)
-         )
+    :<|> "game" :> GameAPI
+
+type GameAPI =
+  QueryParam "playerId" Player.Id
+    :> PostRedirectGet '[JSON, HTML] (APIResponse CreateResult)
+    :<|> QueryParam "playerId" Player.Id
+      :> Capture "gameId" UUID
+      :> Get '[JSON, HTML] (APIResponse GameResult)
+    :<|> QueryParam "playerId" Player.Id
+      :> Capture "gameId" UUID
+      :> "play"
+      :> Capture "card" Card
+      :> PostRedirectGet '[JSON, HTML] (APIResponse PlayResult)
 
 type PostRedirectGet contentTypes a =
   Verb 'POST 303 contentTypes (WithLocation a)
@@ -287,4 +295,13 @@ instance ToHtml ScoreTable where
       let ps = [one, two, three, four]
       thead_ (tr_ (foldMap (th_ . toHtml . fst) ps))
       tbody_ (tr_ (foldMap (td_ . toHtml . show . getSum . snd) ps))
+  toHtmlRaw = toHtml
+
+newtype PlayResult = PlayResult ()
+  deriving (Show, Generic)
+
+instance Aeson.ToJSON PlayResult
+
+instance ToHtml PlayResult where
+  toHtml _ = mempty
   toHtmlRaw = toHtml

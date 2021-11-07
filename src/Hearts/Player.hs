@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -13,6 +14,7 @@ module Hearts.Player (
   Player (..),
   Id (..),
   Game (..),
+  Trick,
   FourPlayers (..),
   fourWith,
   ThreePlayers (..),
@@ -21,11 +23,15 @@ module Hearts.Player (
   getPlayerData,
   takeFour,
   findIndex,
+  setPlayerData,
+  playerData,
 ) where
 
+import Control.Lens (Lens', lens)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Functor (($>))
+import Data.Functor.Identity
 import Data.Monoid (Sum (getSum))
 import Data.Text (Text)
 import Data.Vector (Vector, (!?))
@@ -38,8 +44,8 @@ data Game = Game
   { players :: FourPlayers Id
   , scores :: FourPlayers (Sum Integer)
   , hand :: Maybe (Vector Card)
-  , trick :: Maybe (FourPlayers (Maybe Card))
-  , tricks :: Maybe (FourPlayers (Vector Card))
+  , trick :: Maybe (Trick Maybe)
+  , tricks :: Maybe (Vector (Trick Identity))
   }
   deriving (Show, Eq, Generic)
 
@@ -52,6 +58,10 @@ instance Aeson.ToJSON Game where
       , "trick" .= trick
       , "tricks" .= tricks
       ]
+
+type Trick m =
+  -- | (Starting player, cards)
+  (PlayerIndex, FourPlayers (m Card))
 
 data Player = Player
   { id :: Id
@@ -68,6 +78,9 @@ data PlayerIndex
   | PlayerTwo
   | PlayerThree
   | PlayerFour
+  deriving (Show, Eq, Enum, Bounded, Generic)
+
+instance Aeson.ToJSON PlayerIndex
 
 findIndex :: (a -> Bool) -> FourPlayers a -> Maybe PlayerIndex
 findIndex p FourPlayers{..} =
@@ -78,12 +91,22 @@ findIndex p FourPlayers{..} =
       | p four -> Just PlayerFour
       | otherwise -> Nothing
 
+playerData :: PlayerIndex -> Lens' (FourPlayers a) a
+playerData i = lens (getPlayerData i) (setPlayerData i)
+
 getPlayerData :: PlayerIndex -> FourPlayers a -> a
 getPlayerData = \case
   PlayerOne -> one
   PlayerTwo -> two
   PlayerThree -> three
   PlayerFour -> four
+
+setPlayerData :: PlayerIndex -> FourPlayers a -> a -> FourPlayers a
+setPlayerData i ps a = case i of
+  PlayerOne -> ps{one = a}
+  PlayerTwo -> ps{two = a}
+  PlayerThree -> ps{three = a}
+  PlayerFour -> ps{four = a}
 
 data PlayerData a where
   Four :: FourPlayers a -> PlayerData a

@@ -5,14 +5,19 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Hearts.Server (runServer) where
 
+import Control.Lens ((^.))
+import Control.Lens.Combinators (_Just)
 import qualified Control.Monad as Monad
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import qualified Data.Aeson as Aeson
+import Data.Bifunctor (bimap, first)
 import Data.Coerce (coerce)
+import Data.Generics.Product (field)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.UUID (UUID)
@@ -24,11 +29,14 @@ import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
-import Data.Bifunctor (bimap, first)
+import qualified Data.Text as Text
 import Hearts.API (HeartsAPI, JoinResult (..))
 import qualified Hearts.API as API
+import Hearts.Card (Card)
+import Hearts.Game (Game (Game))
 import qualified Hearts.Game as Game
 import qualified Hearts.Game.Event as Event
+import Hearts.Player (playerData)
 import qualified Hearts.Player as Player
 import qualified Hearts.Player.Event as PlayerEvent
 import Hearts.Player.Id (Id (..))
@@ -49,6 +57,7 @@ server =
     :<|> roomEndpoint
     :<|> create
     :<|> gameEndpoint
+    :<|> playEndpoint
 
 heartsAPI :: Proxy HeartsAPI
 heartsAPI = Proxy
@@ -258,11 +267,23 @@ gameEndpoint (Just playerId) gameId = do
                                   <> Aeson.encode e
                             }
                       )
-                  Right game ->
+                  Right game -> do
+                    let cards = game ^. field @"hands" . _Just . playerData playerIndex
+                    let makePlayAction :: Card -> API.Action
+                        makePlayAction card =
+                          ( API.Action
+                              { name = "Play " <> Text.pack (show card)
+                              , description = "Play " <> Text.pack (show card)
+                              , url = "/game/" <> Text.pack (show gameId) <> "/play/" <> toUrlPiece card
+                              , method = API.Post
+                              , parameters = [("playerId", toQueryParam playerId)]
+                              , inputs = []
+                              }
+                          )
                     pure $
                       Right
                         ( API.APIResponse
-                            { actions = Vector.empty
+                            { actions = makePlayAction <$> cards
                             , result =
                                 API.GameResult
                                   { gameId
@@ -289,5 +310,65 @@ withRoom useRoom = do
       err500
         { errBody =
             "The room has an inconsistent state: "
+              <> Aeson.encode e
+        }
+
+playEndpoint ::
+  Maybe Id ->
+  UUID ->
+  Card ->
+  AppM (API.WithLocation (API.APIResponse API.PlayResult))
+playEndpoint (Just player) gameId card = do
+  gameVar <- asks gameEvents
+  withGame gameId \game@Game{} ->
+    if Game.playingNext' game /= Just player
+      then
+        pure
+          ( Left
+              ( err400
+                  { errBody =
+                      "It's not your turn! Player "
+                        <> Aeson.encode (Game.playingNext' game)
+                        <> " is playing next."
+                  }
+              )
+          )
+      else do
+        let e = Event.Play (Event.PlayEvent card)
+        gameMap <- readTVar gameVar
+        writeTVar gameVar (Map.adjust (`Vector.snoc` e) gameId gameMap)
+        pure
+          ( Right
+              ( addHeader
+                  ( "/game/" <> toQueryParam gameId
+                      <> "?playerId="
+                      <> toQueryParam player
+                  )
+                  (API.APIResponse{actions = Vector.empty, result = API.PlayResult ()})
+              )
+          )
+playEndpoint Nothing _ _ = throwError err400{errBody = "You must provide a player ID"}
+
+withGame :: UUID -> (Game -> STM (Either ServerError a)) -> AppM a
+withGame gameId useGame = do
+  gameVar <- asks gameEvents
+  result <- liftIO $ atomically do
+    gameMap <- readTVar gameVar
+    Monad.join
+      <$> traverse
+        useGame
+        ( maybe
+            (Left (err400{errBody = "Game not found"}))
+            Right
+            (Map.lookup gameId gameMap >>= Vector.uncons)
+            >>= (first gameError . Game.foldEvents Nothing)
+        )
+  either throwError pure result
+  where
+    gameError :: Aeson.ToJSON e => e -> ServerError
+    gameError e =
+      err500
+        { errBody =
+            "The game has an inconsistent state: "
               <> Aeson.encode e
         }

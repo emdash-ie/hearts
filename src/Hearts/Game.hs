@@ -10,6 +10,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
 
 module Hearts.Game (
@@ -20,16 +21,24 @@ module Hearts.Game (
   sortHand,
   foldEvents,
   toPlayerGame,
+  playingNext,
+  playingNext',
 ) where
 
-import Control.Lens (ASetter, ASetter', over, to, (%~), (.~), (^.))
+import Control.Applicative ((<|>))
+import Control.Lens (ASetter, ASetter', over, set, to, (%~), (.~), (^.))
+import Control.Monad (guard)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Foldable (foldl', toList)
 import Data.Function ((&))
+import Data.Functor (($>))
+import Data.Functor.Identity
 import Data.Generics.Product (field)
-import Data.Maybe (fromMaybe)
-import Data.Monoid (Sum (..))
+import Data.List (find, maximumBy)
+import Data.Maybe (fromMaybe, isNothing)
+import Data.Monoid (First (First), Sum (..), getFirst)
+import Data.Ord (comparing)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
@@ -37,15 +46,15 @@ import GHC.Generics (Generic)
 import Hearts.Card
 import qualified Hearts.Card as Card
 import Hearts.Game.Event
-import Hearts.Player (FourPlayers (..), ThreePlayers (..))
+import Hearts.Player (FourPlayers (..), PlayerIndex (..), ThreePlayers (..), Trick, playerData)
 import qualified Hearts.Player as Player
 
 data Game = Game
   { players :: FourPlayers Player.Id
   , scores :: FourPlayers (Sum Integer)
   , hands :: Maybe (FourPlayers (Vector Card))
-  , trick :: Maybe (FourPlayers (Maybe Card))
-  , tricks :: Maybe (FourPlayers (Vector Card))
+  , trick :: Maybe (Trick Maybe)
+  , tricks :: Maybe (Vector (Trick Identity))
   }
   deriving (Show, Eq, Generic)
 
@@ -59,7 +68,7 @@ instance Aeson.ToJSON Game where
       , "tricks" .= tricks
       ]
 
-toPlayerGame :: Player.PlayerIndex -> Game -> Player.Game
+toPlayerGame :: PlayerIndex -> Game -> Player.Game
 toPlayerGame index Game{..} =
   Player.Game
     { hand = Player.getPlayerData index <$> hands
@@ -103,21 +112,32 @@ processEvent Nothing (Start StartEvent{..}) =
 processEvent Nothing event = Left (GameNotStarted event)
 processEvent (Just game) (Start event) = Left (GameAlreadyStarted game event)
 processEvent (Just game) (Deal (DealEvent (Deck deck))) =
-  let updateHands = field @"hands" .~ Just (sortHand <$> dealAmong4 deck)
-   in Right (updateHands game)
+  let hands = sortHand <$> dealAmong4 deck
+      updateHands = field @"hands" .~ Just hands
+      initialiseTrick :: Game -> Game
+      initialiseTrick =
+        field @"trick" .~ fmap (,pure Nothing) (playingFirst hands)
+   in Right (initialiseTrick (updateHands game))
 processEvent (Just game) (Play PlayEvent{}) =
-  let trickIsFinished :: FourPlayers (Maybe Card) -> Maybe (FourPlayers Card)
-      trickIsFinished = \FourPlayers{..} ->
+  let trickIsFinished :: Trick Maybe -> Maybe (Trick Identity)
+      trickIsFinished (i, FourPlayers{..}) =
         case (one, two, three, four) of
           (Just one', Just two', Just three', Just four') ->
-            Just (FourPlayers{one = one', two = two', three = three', four = four'})
+            Just (i, Identity <$> FourPlayers{one = one', two = two', three = three', four = four'})
           _ -> Nothing
       maybeDiscardTrick :: Game -> Game
       maybeDiscardTrick g = fromMaybe g do
-        trick :: FourPlayers Card <- g ^. field @"trick" . to (>>= trickIsFinished)
+        trick <-
+          g
+            ^. field @"trick"
+              . to (>>= trickIsFinished)
         pure
-          ( g & field @"tricks" %~ fmap (fmap (flip Vector.snoc) trick <*>)
-              & field @"trick" .~ Nothing
+          ( g & field @"tricks" %~ Just . maybe (Vector.singleton trick) (`Vector.snoc` trick)
+              & field @"trick"
+                .~ ( if g ^. field @"hands" . to handIsFinished
+                      then Nothing
+                      else Just (winner trick, pure Nothing)
+                   )
           )
       handIsFinished :: Maybe (FourPlayers (Vector a)) -> Bool
       handIsFinished = maybe False \FourPlayers{..} ->
@@ -126,13 +146,73 @@ processEvent (Just game) (Play PlayEvent{}) =
       maybeScoreHand g =
         if g ^. field @"hands" . to handIsFinished
           then fromMaybe g do
-            updateScores <-
+            scores <-
               g
                 ^. field @"tricks"
-                  . to (fmap (fmap (foldMap Card.score)))
-            pure (over (field @"scores") (updateScores <>) g)
+                  . to (fmap (foldMap scoreTrick))
+            pure (over (field @"scores") (scores <>) g)
           else g
    in Right (maybeScoreHand (maybeDiscardTrick game))
+
+scoreTrick :: Trick Identity -> FourPlayers (Sum Integer)
+scoreTrick t =
+  let w = winner t
+      winnerScore = foldMap Card.score (t ^. to snd . playerData w)
+   in set (playerData w) winnerScore (pure 0)
+
+playingNext :: Game -> Maybe PlayerIndex
+playingNext Game{trick, tricks} =
+  checkCurrentTrick <|> checkLastTrick
+  where
+    checkCurrentTrick :: Maybe PlayerIndex
+    checkCurrentTrick = do
+      (firstPlayer, t) <- trick
+      let cards :: [(PlayerIndex, Maybe Card)]
+          cards = playOrder firstPlayer ((,) <$> indices <*> t)
+      fmap fst (find (isNothing . snd) cards)
+    checkLastTrick = do
+      ts <- tricks
+      t <- guard (not (Vector.null ts)) $> Vector.last ts
+      pure (winner t)
+    indices = FourPlayers PlayerOne PlayerTwo PlayerThree PlayerFour
+
+playingNext' :: Game -> Maybe Player.Id
+playingNext' g = do
+  i <- playingNext g
+  pure (g ^. field @"players" . playerData i)
+
+playingFirst :: FourPlayers (Vector Card) -> Maybe PlayerIndex
+playingFirst hands = do
+  let indices = [minBound .. maxBound]
+  let indexed = zip indices (toList hands)
+  let f :: (PlayerIndex, Vector Card) -> First PlayerIndex
+      f (i, h) =
+        First $
+          if Card Clubs Two `elem` h
+            then Just i
+            else Nothing
+  getFirst (foldMap f indexed)
+
+winner :: Trick Identity -> PlayerIndex
+winner (firstPlayer, trick) =
+  let s = Card.suit (runIdentity (Player.getPlayerData firstPlayer trick))
+      effectiveValue Card{suit, value} =
+        if suit == s
+          then Just value
+          else Nothing
+      indices = [minBound .. maxBound]
+   in fst
+        ( maximumBy
+            (comparing (effectiveValue . snd))
+            (zip indices (runIdentity <$> toList trick))
+        )
+
+playOrder :: PlayerIndex -> FourPlayers a -> [a]
+playOrder index pd =
+  let as = (`Player.getPlayerData` pd) <$> cycle [minBound .. maxBound]
+   in take
+        (fromEnum (maxBound :: PlayerIndex) - fromEnum (minBound :: PlayerIndex))
+        (drop (fromEnum index) as)
 
 dealAmong ::
   (Monoid (h [a]), Foldable t) =>

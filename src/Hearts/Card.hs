@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards, sortCards) where
@@ -7,10 +8,13 @@ module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards, sortCards
 import qualified Data.Aeson as Aeson
 import Data.List (sortOn)
 import Data.Monoid (Sum)
+import qualified Data.Text as Text
 import GHC.Generics (Generic)
 import Lucid (ToHtml (..), span_, style_)
+import Servant (FromHttpApiData, ToHttpApiData, toUrlPiece)
+import Servant.API (parseUrlPiece)
 
-data Card = Card Suit Value
+data Card = Card {suit :: Suit, value :: Value}
   deriving (Eq, Generic)
 
 instance Show Card where
@@ -71,16 +75,65 @@ instance Show Card where
 instance Aeson.ToJSON Card
 
 instance ToHtml Card where
-  toHtml c@(Card suit _) =
+  toHtml c@(Card s _) =
     let size = "font-size: 100px;"
         colour =
-          "color: " <> case suit of
+          "color: " <> case s of
             Clubs -> "black"
             Spades -> "black"
             Diamonds -> "crimson"
             Hearts -> "crimson"
      in span_ [style_ (size <> colour)] (toHtml (show c))
   toHtmlRaw = toHtml
+
+instance FromHttpApiData Card where
+  parseUrlPiece p =
+    let (suitText, valueText) = Text.splitAt 1 p
+        s = case suitText of
+          "C" -> Right Clubs
+          "D" -> Right Diamonds
+          "S" -> Right Spades
+          "H" -> Right Hearts
+          _ -> Left "Unrecognised suit"
+        v = case valueText of
+          "2" -> Right Two
+          "3" -> Right Three
+          "4" -> Right Four
+          "5" -> Right Five
+          "6" -> Right Six
+          "7" -> Right Seven
+          "8" -> Right Eight
+          "9" -> Right Nine
+          "10" -> Right Ten
+          "J" -> Right Jack
+          "Q" -> Right Queen
+          "K" -> Right King
+          "A" -> Right Ace
+          _ -> Left "Unrecognised value"
+     in Card <$> s <*> v
+
+instance ToHttpApiData Card where
+  toUrlPiece Card{suit, value} =
+    let suitText = case suit of
+          Clubs -> "C"
+          Diamonds -> "D"
+          Spades -> "S"
+          Hearts -> "H"
+        valueText = case value of
+          Two -> "2"
+          Three -> "3"
+          Four -> "4"
+          Five -> "5"
+          Six -> "6"
+          Seven -> "7"
+          Eight -> "8"
+          Nine -> "9"
+          Ten -> "10"
+          Jack -> "J"
+          Queen -> "Q"
+          King -> "K"
+          Ace -> "A"
+     in suitText <> valueText
 
 data Suit
   = Clubs
@@ -147,6 +200,3 @@ allCards =
 
 sortCards :: [Card] -> [Card]
 sortCards = sortOn suit . sortOn value
-  where
-    suit (Card s _) = s
-    value (Card _ v) = v
