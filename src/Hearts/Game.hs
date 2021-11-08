@@ -218,7 +218,7 @@ playOrder :: PlayerIndex -> FourPlayers a -> [a]
 playOrder index pd =
   let as = (`Player.getPlayerData` pd) <$> cycle [minBound .. maxBound]
    in take
-        (fromEnum (maxBound :: PlayerIndex) - fromEnum (minBound :: PlayerIndex))
+        (fromEnum (maxBound :: PlayerIndex) - fromEnum (minBound :: PlayerIndex) + 1)
         (drop (fromEnum index) as)
 
 dealAmong ::
