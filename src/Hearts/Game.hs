@@ -26,7 +26,7 @@ module Hearts.Game (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Lens (ASetter, ASetter', over, set, to, (%~), (.~), (^.))
+import Control.Lens (ASetter, ASetter', over, set, to, (%~), (.~), (?~), (^.), _2, _Just)
 import Control.Monad (guard)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
@@ -43,6 +43,7 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 
+import Control.Category ((>>>))
 import Hearts.Card
 import qualified Hearts.Card as Card
 import Hearts.Game.Event
@@ -118,7 +119,7 @@ processEvent (Just game) (Deal (DealEvent (Deck deck))) =
       initialiseTrick =
         field @"trick" .~ fmap (,pure Nothing) (playingFirst hands)
    in Right (initialiseTrick (updateHands game))
-processEvent (Just game) (Play PlayEvent{}) =
+processEvent (Just game) (Play PlayEvent{card}) =
   let trickIsFinished :: Trick Maybe -> Maybe (Trick Identity)
       trickIsFinished (i, FourPlayers{..}) =
         case (one, two, three, four) of
@@ -152,7 +153,13 @@ processEvent (Just game) (Play PlayEvent{}) =
                   . to (fmap (foldMap scoreTrick))
             pure (over (field @"scores") (scores <>) g)
           else g
-   in Right (maybeScoreHand (maybeDiscardTrick game))
+      playCard :: Game -> Game
+      playCard g = fromMaybe g do
+        index <- playingNext g
+        let addCardToTrick = field @"trick" . _Just . _2 . playerData index ?~ card
+        let removeCardFromHand = field @"hands" . _Just . playerData index %~ Vector.filter (/= card)
+        pure ((removeCardFromHand >>> addCardToTrick) g)
+   in Right (maybeScoreHand (maybeDiscardTrick (playCard game)))
 
 scoreTrick :: Trick Identity -> FourPlayers (Sum Integer)
 scoreTrick t =
