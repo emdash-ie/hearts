@@ -9,15 +9,12 @@
 
 module Hearts.Server (runServer) where
 
-import Control.Lens ((^.))
-import Control.Lens.Combinators (_Just)
 import qualified Control.Monad as Monad
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (bimap, first)
 import Data.Coerce (coerce)
-import Data.Generics.Product (field)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.UUID (UUID)
@@ -30,13 +27,11 @@ import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
 import qualified Data.Text as Text
-import Hearts.API (HeartsAPI, JoinResult (..))
+import Hearts.API (HeartsAPI, RoomResponse (..))
 import qualified Hearts.API as API
-import Hearts.Card (Card)
 import Hearts.Game (Game (Game))
 import qualified Hearts.Game as Game
 import qualified Hearts.Game.Event as Event
-import Hearts.Player (playerData)
 import qualified Hearts.Player as Player
 import qualified Hearts.Player.Event as PlayerEvent
 import Hearts.Player.Id (Id (..))
@@ -75,26 +70,23 @@ data ServerState = ServerState
   , gameEvents :: TVar (Map UUID (Vector Game.Event))
   }
 
-root :: AppM (API.APIResponse API.RootResult)
+root :: AppM API.RootResponse
 root =
   pure
-    ( API.APIResponse
-        { result = API.RootResult ()
-        , actions =
-            Vector.singleton
-              ( API.Action
-                  { name = "Join room"
-                  , description = "Join room"
-                  , url = "join"
-                  , method = API.Post
-                  , parameters = []
-                  , inputs = [API.TextInput "username" "Username:" True]
-                  }
-              )
+    ( API.RootResponse
+        { joinRoom =
+            API.Action
+              { name = "Join room"
+              , description = "Join room"
+              , url = "join"
+              , method = API.Post
+              , parameters = []
+              , inputs = [API.TextInput "username" "Username:" True]
+              }
         }
     )
 
-join :: API.JoinRequest -> AppM (API.WithLocation API.JoinResponse)
+join :: API.JoinRequest -> AppM (API.WithLocation API.RoomResponse)
 join API.JoinRequest{username} = do
   roomVar <- asks roomEvents
   withRoom \room@Room{players} -> do
@@ -113,27 +105,16 @@ join API.JoinRequest{username} = do
       Vector Player.Id ->
       Id ->
       Room ->
-      API.WithLocation API.JoinResponse
+      API.WithLocation API.RoomResponse
     makeResponse players assignedId newRoom =
       addHeader
         ("room?playerId=" <> toQueryParam assignedId)
-        ( API.APIResponse
-            { actions =
+        ( let startGame =
                 if Vector.length players >= 3
-                  then
-                    Vector.singleton
-                      ( API.Action
-                          { name = "Start game"
-                          , description = "Start a new game"
-                          , url = "game"
-                          , method = API.Post
-                          , parameters = [("id", toQueryParam assignedId)]
-                          , inputs = []
-                          }
-                      )
-                  else Vector.empty
-            , result = JoinResult{room = newRoom, assignedId}
-            }
+                  then Just (startGameAction assignedId)
+                  else Nothing
+              refresh = refreshAction assignedId
+           in RoomResponse{room = newRoom, assignedId, startGame, refresh}
         )
     makeError :: Aeson.ToJSON e => e -> ServerError
     makeError e =
@@ -143,43 +124,43 @@ join API.JoinRequest{username} = do
               <> Aeson.encode e
         }
 
-roomEndpoint :: Maybe Player.Id -> AppM API.JoinResponse
+roomEndpoint :: Maybe Player.Id -> AppM API.RoomResponse
 roomEndpoint Nothing = throwError err400
 roomEndpoint (Just playerId) = withRoom \room@Room{players} ->
   pure
     ( Right
-        ( API.APIResponse
-            { actions =
-                let start =
-                      if Vector.length players >= 4
-                        then
-                          Vector.singleton
-                            ( API.Action
-                                { name = "Start game"
-                                , description = "Start a new game"
-                                , url = "game"
-                                , method = API.Post
-                                , parameters = [("playerId", toQueryParam playerId)]
-                                , inputs = []
-                                }
-                            )
-                        else Vector.empty
-                    refresh =
-                      API.Action
-                        { name = "Check for updates"
-                        , description = "Check for updates"
-                        , url = "room"
-                        , method = API.Get
-                        , parameters = [("playerId", toQueryParam playerId)]
-                        , inputs = []
-                        }
-                 in Vector.cons refresh start
-            , result = JoinResult{room, assignedId = playerId}
-            }
+        ( let startGame =
+                if Vector.length players >= 4
+                  then Just (startGameAction playerId)
+                  else Nothing
+              refresh = refreshAction playerId
+           in RoomResponse{room, assignedId = playerId, startGame, refresh}
         )
     )
 
-create :: Maybe Player.Id -> AppM (API.WithLocation API.CreateResponse)
+startGameAction :: Player.Id -> API.Action
+startGameAction playerId =
+  API.Action
+    { name = "Start game"
+    , description = "Start a new game"
+    , url = "game"
+    , method = API.Post
+    , parameters = [("playerId", toQueryParam playerId)]
+    , inputs = []
+    }
+
+refreshAction :: Player.Id -> API.Action
+refreshAction playerId =
+  API.Action
+    { name = "Check for updates"
+    , description = "Check for updates"
+    , url = "room"
+    , method = API.Get
+    , parameters = [("playerId", toQueryParam playerId)]
+    , inputs = []
+    }
+
+create :: Maybe Player.Id -> AppM (API.WithLocation API.CreateResult)
 create (Just playerId) = do
   roomVar <- asks roomEvents
   gameVar <- asks gameEvents
@@ -226,14 +207,10 @@ create (Just playerId) = do
                     <> "?playerId="
                     <> toQueryParam playerId
                 )
-                ( API.APIResponse
-                    { actions = Vector.empty
-                    , result = API.CreateResult{..}
-                    }
-                )
+                API.CreateResult{..}
 create Nothing = throwError err400{errBody = "You must provide a player ID"}
 
-gameEndpoint :: Maybe Player.Id -> UUID -> AppM (API.APIResponse API.GameResult)
+gameEndpoint :: Maybe Player.Id -> UUID -> AppM API.GameResult
 gameEndpoint (Just playerId) gameId = do
   gameVar <- asks gameEvents
   withRoom \Room{players} ->
@@ -268,13 +245,12 @@ gameEndpoint (Just playerId) gameId = do
                             }
                       )
                   Right game -> do
-                    let cards = game ^. field @"hands" . _Just . playerData playerIndex
-                    let makePlayAction :: Card -> API.Action
-                        makePlayAction card =
+                    let playAction :: API.Action
+                        playAction =
                           ( API.Action
-                              { name = "Play " <> Text.pack (show card)
-                              , description = "Play " <> Text.pack (show card)
-                              , url = "/game/" <> Text.pack (show gameId) <> "/play/" <> toUrlPiece card
+                              { name = "Play card"
+                              , description = "Play card"
+                              , url = "/game/" <> Text.pack (show gameId) <> "/play"
                               , method = API.Post
                               , parameters = [("playerId", toQueryParam playerId)]
                               , inputs = []
@@ -282,14 +258,11 @@ gameEndpoint (Just playerId) gameId = do
                           )
                     pure $
                       Right
-                        ( API.APIResponse
-                            { actions = makePlayAction <$> cards
-                            , result =
-                                API.GameResult
-                                  { gameId
-                                  , usernames = Player.username <$> fourPlayers
-                                  , game = Game.toPlayerGame playerIndex game
-                                  }
+                        ( API.GameResult
+                            { gameId
+                            , usernames = Player.username <$> fourPlayers
+                            , game = Game.toPlayerGame playerIndex game
+                            , playCard = playAction
                             }
                         )
 gameEndpoint Nothing _ = throwError err400{errBody = "You must provide a player ID"}
@@ -316,9 +289,9 @@ withRoom useRoom = do
 playEndpoint ::
   Maybe Id ->
   UUID ->
-  Card ->
-  AppM (API.WithLocation (API.APIResponse API.PlayResult))
-playEndpoint (Just player) gameId card = do
+  API.CardSelection ->
+  AppM (API.WithLocation API.PlayResult)
+playEndpoint (Just player) gameId (API.CardSelection card) = do
   gameVar <- asks gameEvents
   withGame gameId \game@Game{} ->
     if Game.playingNext' game /= Just player
@@ -344,7 +317,7 @@ playEndpoint (Just player) gameId card = do
                       <> "?playerId="
                       <> toQueryParam player
                   )
-                  (API.APIResponse{actions = Vector.empty, result = API.PlayResult ()})
+                  (API.PlayResult ())
               )
           )
 playEndpoint Nothing _ _ = throwError err400{errBody = "You must provide a player ID"}
