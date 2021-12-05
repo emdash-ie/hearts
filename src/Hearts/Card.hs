@@ -3,14 +3,24 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Hearts.Card (Card (..), Suit (..), Value (..), score, allCards, sortCards) where
+module Hearts.Card (
+  Card (..),
+  Suit (..),
+  Value (..),
+  score,
+  allCards,
+  sortCards,
+  cardHtml,
+  faceDownCard,
+) where
 
 import qualified Data.Aeson as Aeson
 import Data.List (sortOn)
 import Data.Monoid (Sum)
+import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
-import Lucid (ToHtml (..), span_, style_)
+import Lucid (HtmlT, ToHtml (..), span_, style_)
 import Servant (FromHttpApiData, ToHttpApiData, toUrlPiece)
 import Servant.API (parseUrlPiece)
 
@@ -76,15 +86,22 @@ instance Aeson.ToJSON Card
 
 instance ToHtml Card where
   toHtml c@(Card s _) =
-    let size = "font-size: 100px;"
-        colour =
+    let colour =
           "color: " <> case s of
             Clubs -> "black"
             Spades -> "black"
             Diamonds -> "crimson"
             Hearts -> "crimson"
-     in span_ [style_ (size <> colour)] (toHtml (show c))
+     in cardHtml colour (Text.pack (show c))
   toHtmlRaw = toHtml
+
+faceDownCard :: Text
+faceDownCard = "🂠"
+
+cardHtml :: Monad m => Text -> Text -> HtmlT m ()
+cardHtml colour t =
+  let size = "font-size: 100px;"
+   in span_ [style_ (size <> colour)] (toHtml t)
 
 instance FromHttpApiData Card where
   parseUrlPiece p =

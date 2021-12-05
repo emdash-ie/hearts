@@ -6,6 +6,7 @@
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
@@ -24,14 +25,21 @@ module Hearts.API (
   WithLocation,
 ) where
 
+import Control.Lens (Identity (runIdentity), (%~), (^.))
+import Control.Monad (unless)
 import qualified Data.Aeson as Aeson
 import Data.Bool (bool)
 import Data.Coerce (coerce)
+import qualified Data.Foldable as Foldable
+import Data.Function ((&))
+import Data.Generics.Product (field)
+import Data.Maybe (fromMaybe)
 import Data.Monoid (Sum (..))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
 import Data.Vector (Vector)
+import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 import Lucid (
   HtmlT,
@@ -69,11 +77,7 @@ import Servant hiding (Required)
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm)
 
-import Control.Monad (unless)
-import qualified Data.Foldable as Foldable
-import Data.Maybe (fromMaybe)
-import qualified Data.Vector as Vector
-import Hearts.Card (Card)
+import Hearts.Card (Card, cardHtml, faceDownCard)
 import Hearts.Player (Player (Player))
 import qualified Hearts.Player as Player
 import Hearts.Player.Event (DealEvent (..), StartEvent (..))
@@ -257,6 +261,8 @@ data GameResult = GameResult
   { gameId :: UUID
   , usernames :: Player.FourPlayers Text
   , game :: Player.Game
+  , playingNext :: Maybe Player.PlayerIndex
+  , you :: Player.PlayerIndex
   , playCard :: Action
   }
   deriving (Show, Eq, Generic)
@@ -268,20 +274,46 @@ instance ToHtml GameResult where
     GameResult
       { gameId
       , usernames
-      , game = Player.Game{players, hand, scores}
+      , game = Player.Game{players, hand, scores, trick, tricks}
+      , playingNext
+      , you
       , playCard
       } = do
       let ps = Player <$> players <*> usernames
       h1_ ("Game " <> toHtml (show gameId))
       p_ "The players in this game are:"
-      toHtml (PlayerList ps)
+      toHtml (PlayerList (you, ps))
       h2_ "Scores:"
-      toHtml (ScoreTable ((,) <$> usernames <*> scores))
+      toHtml (ScoreTable (you, (,) <$> usernames <*> scores))
+      case trick of
+        Nothing -> mempty
+        Just (_, cards) -> do
+          h2_ "Current trick:"
+          let f :: Monad m => (Player.Id, Text) -> HtmlT m ()
+              f (p, u) =
+                th_
+                  ( toHtml
+                      if Just p == fmap ((players ^.) . Player.playerData) playingNext
+                        then u <> " (next)"
+                        else u
+                  )
+          table_ do
+            tr_ (foldMap f ((,) <$> players <*> usernames))
+            tr_ (foldMap (td_ . maybe (cardHtml "black" faceDownCard) toHtml) cards)
       fromMaybe (pure ()) do
         h <- hand
         pure do
           h2_ "Your hand:"
           displayHand (fullUrl playCard) h
+      case tricks of
+        Nothing -> mempty
+        Just ts -> do
+          h2_ "Past tricks:"
+          let makeRow :: Monad m => Player.Trick Identity -> HtmlT m ()
+              makeRow (_, cards) = tr_ (foldMap (td_ . toHtml . runIdentity) cards)
+          table_ do
+            tr_ (foldMap (th_ . toHtml) usernames)
+            tr_ (foldMap makeRow (Vector.reverse ts))
   toHtmlRaw = toHtml
 
 displayHand :: Monad m => Text -> Vector Card -> HtmlT m ()
@@ -301,23 +333,26 @@ displayHand url hand = form_
         ]
     input_ [type_ "submit", value_ "Play card"]
 
-newtype PlayerList = PlayerList (Player.FourPlayers Player)
+newtype PlayerList = PlayerList (Player.PlayerIndex, Player.FourPlayers Player)
 
 instance ToHtml PlayerList where
-  toHtml (PlayerList Player.FourPlayers{one, two, three, four}) =
-    ul_
-      ( foldMap
-          (li_ . toHtml . Player.username)
-          [one, two, three, four]
-      )
+  toHtml (PlayerList (you, players)) =
+    let players' = players & Player.playerData you . field @"username" %~ (<> " (you)")
+        usernames = fmap (players' ^.) [field @"one", field @"two", field @"three", field @"four"]
+     in ul_
+          ( foldMap
+              (li_ . toHtml . Player.username)
+              usernames
+          )
   toHtmlRaw = toHtml
 
-newtype ScoreTable = ScoreTable (Player.FourPlayers (Text, Sum Integer))
+newtype ScoreTable = ScoreTable (Player.PlayerIndex, Player.FourPlayers (Text, Sum Integer))
 
 instance ToHtml ScoreTable where
-  toHtml (ScoreTable Player.FourPlayers{one, two, three, four}) =
+  toHtml (ScoreTable (_, fp)) =
     table_ do
-      let ps = [one, two, three, four]
+      let ps :: [(Text, Sum Integer)]
+          ps = fmap (fp ^.) [field @"one", field @"two", field @"three", field @"four"]
       thead_ (tr_ (foldMap (th_ . toHtml . fst) ps))
       tbody_ (tr_ (foldMap (td_ . toHtml . show . getSum . snd) ps))
   toHtmlRaw = toHtml

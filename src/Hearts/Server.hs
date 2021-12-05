@@ -17,6 +17,7 @@ import Data.Bifunctor (bimap, first)
 import Data.Coerce (coerce)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.Text as Text
 import Data.UUID (UUID)
 import qualified Data.UUID.V4 as UUID
 import Data.Vector (Vector)
@@ -26,7 +27,6 @@ import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
-import qualified Data.Text as Text
 import Hearts.API (HeartsAPI, RoomResponse (..))
 import qualified Hearts.API as API
 import Hearts.Game (Game (Game))
@@ -262,6 +262,8 @@ gameEndpoint (Just playerId) gameId = do
                             { gameId
                             , usernames = Player.username <$> fourPlayers
                             , game = Game.toPlayerGame playerIndex game
+                            , playingNext = Game.playingNext game
+                            , you = playerIndex
                             , playCard = playAction
                             }
                         )
@@ -309,17 +311,22 @@ playEndpoint (Just player) gameId (API.CardSelection card) = do
       else do
         let e = Event.Play (Event.PlayEvent card)
         gameMap <- readTVar gameVar
-        writeTVar gameVar (Map.adjust (`Vector.snoc` e) gameId gameMap)
-        pure
-          ( Right
-              ( addHeader
-                  ( "/game/" <> toQueryParam gameId
-                      <> "?playerId="
-                      <> toQueryParam player
-                  )
-                  (API.PlayResult ())
-              )
-          )
+        case Map.lookup gameId gameMap >>= Vector.uncons of
+          Nothing -> pure (Left (err400{errBody = "Game " <> Aeson.encode gameId <> " not found!"}))
+          Just (e', es) -> case Game.foldEvents Nothing (e', Vector.snoc es e) of
+            Left err -> pure (Left (err400{errBody = "Couldn't apply event: " <> Aeson.encode err}))
+            Right _ -> do
+              writeTVar gameVar (Map.adjust (`Vector.snoc` e) gameId gameMap)
+              pure
+                ( Right
+                    ( addHeader
+                        ( "/game/" <> toQueryParam gameId
+                            <> "?playerId="
+                            <> toQueryParam player
+                        )
+                        (API.PlayResult ())
+                    )
+                )
 playEndpoint Nothing _ _ = throwError err400{errBody = "You must provide a player ID"}
 
 withGame :: UUID -> (Game -> STM (Either ServerError a)) -> AppM a

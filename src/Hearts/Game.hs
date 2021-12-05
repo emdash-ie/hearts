@@ -31,7 +31,7 @@ import Control.Monad (guard)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Foldable (foldl', toList)
-import Data.Function ((&))
+import Data.Function (on, (&))
 import Data.Functor (($>))
 import Data.Functor.Identity
 import Data.Generics.Product (field)
@@ -82,9 +82,18 @@ data FoldError
     GameNotStarted Event
   | -- | This 'Game' has already started, so this 'StartEvent' can't be applied.
     GameAlreadyStarted Game StartEvent
+  | -- | This play can't be made with this game state.
+    PlayInvalid PlayError Game PlayEvent
   deriving (Show, Generic)
 
 instance Aeson.ToJSON FoldError
+
+data PlayError
+  = -- | This play is invalid because it does not follow suit.
+    NotFollowingSuit
+  deriving (Show, Generic)
+
+instance Aeson.ToJSON PlayError
 
 foldEvents ::
   Foldable f =>
@@ -119,7 +128,7 @@ processEvent (Just game) (Deal (DealEvent (Deck deck))) =
       initialiseTrick =
         field @"trick" .~ fmap (,pure Nothing) (playingFirst hands)
    in Right (initialiseTrick (updateHands game))
-processEvent (Just game) (Play PlayEvent{card}) =
+processEvent (Just game) (Play playEvent@PlayEvent{card}) =
   let trickIsFinished :: Trick Maybe -> Maybe (Trick Identity)
       trickIsFinished (i, FourPlayers{..}) =
         case (one, two, three, four) of
@@ -159,7 +168,34 @@ processEvent (Just game) (Play PlayEvent{card}) =
         let addCardToTrick = field @"trick" . _Just . _2 . playerData index ?~ card
         let removeCardFromHand = field @"hands" . _Just . playerData index %~ Vector.filter (/= card)
         pure ((removeCardFromHand >>> addCardToTrick) g)
-   in Right (maybeScoreHand (maybeDiscardTrick (playCard game)))
+      checkFollowingSuit' :: Bool
+      checkFollowingSuit' = fromMaybe False do
+        hands <- game ^. field @"hands"
+        next <- playingNext game
+        pure (checkFollowingSuit game hands next card)
+   in if checkFollowingSuit'
+        then Right (maybeScoreHand (maybeDiscardTrick (playCard game)))
+        else Left (PlayInvalid NotFollowingSuit game playEvent)
+
+-- | Played next, would this card follow suit (or not) correctly?
+checkFollowingSuit :: Game -> FourPlayers (Vector Card) -> PlayerIndex -> Card -> Bool
+checkFollowingSuit game hands nextPlayer card =
+  if shouldFollowSuit
+    then isFollowingSuit
+    else True
+  where
+    firstCard :: Maybe Card
+    firstCard = do
+      (startingPlayer, trick) <- game ^. field @"trick"
+      Player.getPlayerData startingPlayer trick
+    playerCards :: Vector Card
+    playerCards = Player.getPlayerData nextPlayer hands
+    shouldFollowSuit :: Bool
+    shouldFollowSuit = fromMaybe False do
+      c <- firstCard
+      pure (Vector.any (((==) `on` suit) c) playerCards)
+    isFollowingSuit :: Bool
+    isFollowingSuit = maybe False ((suit card ==) . suit) firstCard
 
 scoreTrick :: Trick Identity -> FourPlayers (Sum Integer)
 scoreTrick t =
@@ -175,7 +211,7 @@ playingNext Game{trick, tricks} =
     checkCurrentTrick = do
       (firstPlayer, t) <- trick
       let cards :: [(PlayerIndex, Maybe Card)]
-          cards = playOrder firstPlayer ((,) <$> indices <*> t)
+          cards = Player.playOrder firstPlayer ((,) <$> indices <*> t)
       fmap fst (find (isNothing . snd) cards)
     checkLastTrick = do
       ts <- tricks
@@ -213,13 +249,6 @@ winner (firstPlayer, trick) =
             (comparing (effectiveValue . snd))
             (zip indices (runIdentity <$> toList trick))
         )
-
-playOrder :: PlayerIndex -> FourPlayers a -> [a]
-playOrder index pd =
-  let as = (`Player.getPlayerData` pd) <$> cycle [minBound .. maxBound]
-   in take
-        (fromEnum (maxBound :: PlayerIndex) - fromEnum (minBound :: PlayerIndex) + 1)
-        (drop (fromEnum index) as)
 
 dealAmong ::
   (Monoid (h [a]), Foldable t) =>

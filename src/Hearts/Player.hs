@@ -25,6 +25,7 @@ module Hearts.Player (
   findIndex,
   setPlayerData,
   playerData,
+  playOrder,
 ) where
 
 import Control.Lens (Lens', lens)
@@ -90,6 +91,13 @@ findIndex p FourPlayers{..} =
       | p three -> Just PlayerThree
       | p four -> Just PlayerFour
       | otherwise -> Nothing
+
+playOrder :: PlayerIndex -> FourPlayers a -> [a]
+playOrder index pd =
+  let as = (`getPlayerData` pd) <$> cycle [minBound .. maxBound]
+   in take
+        (fromEnum (maxBound :: PlayerIndex) - fromEnum (minBound :: PlayerIndex) + 1)
+        (drop (fromEnum index) as)
 
 playerData :: PlayerIndex -> Lens' (FourPlayers a) a
 playerData i = lens (getPlayerData i) (setPlayerData i)
