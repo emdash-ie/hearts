@@ -46,6 +46,7 @@ import Lucid (
   ToHtml (..),
   a_,
   action_,
+  class_,
   fieldset_,
   for_,
   form_,
@@ -78,7 +79,7 @@ import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm)
 
 import Hearts.Card (Card, cardHtml, faceDownCard)
-import Hearts.Player (Player (Player))
+import Hearts.Player (Player)
 import qualified Hearts.Player as Player
 import Hearts.Player.Event (DealEvent (..), StartEvent (..))
 import Hearts.Room (Room (..))
@@ -278,25 +279,28 @@ instance ToHtml GameResult where
       , playingNext
       , you
       , playCard
-      } = do
-      let ps = Player <$> players <*> usernames
-      h1_ ("Game " <> toHtml (show gameId))
-      p_ "The players in this game are:"
-      toHtml (PlayerList (you, ps))
+      } = withCSS "../" do
+      h1_ "Hearts"
+      let username = Player.getPlayerData you usernames
+      p_ ("Welcome to game " <> toHtml (show gameId) <> ", " <> toHtml username <> "!")
       h2_ "Scores:"
       toHtml (ScoreTable (you, (,) <$> usernames <*> scores))
       case trick of
         Nothing -> mempty
         Just (_, cards) -> do
-          h2_ "Current trick:"
+          let nextUsername = case playingNext of
+                Nothing -> ""
+                Just next -> usernames ^. Player.playerData next
+          let statusMessage =
+                if Just you == playingNext
+                  then "you’re up!"
+                  else nextUsername <> " is playing next"
+          h2_ (toHtml ("Current trick: " <> statusMessage))
           let f :: Monad m => (Player.Id, Text) -> HtmlT m ()
               f (p, u) =
-                th_
-                  ( toHtml
-                      if Just p == fmap ((players ^.) . Player.playerData) playingNext
-                        then u <> " (next)"
-                        else u
-                  )
+                if Just p == fmap ((players ^.) . Player.playerData) playingNext
+                  then th_ [class_ "next"] (toHtml u)
+                  else th_ (toHtml u)
           table_ do
             tr_ (foldMap f ((,) <$> players <*> usernames))
             tr_ (foldMap (td_ . maybe (cardHtml "black" faceDownCard) toHtml) cards)
@@ -349,11 +353,16 @@ instance ToHtml PlayerList where
 newtype ScoreTable = ScoreTable (Player.PlayerIndex, Player.FourPlayers (Text, Sum Integer))
 
 instance ToHtml ScoreTable where
-  toHtml (ScoreTable (_, fp)) =
+  toHtml (ScoreTable (you, fp)) =
     table_ do
       let ps :: [(Text, Sum Integer)]
           ps = fmap (fp ^.) [field @"one", field @"two", field @"three", field @"four"]
-      thead_ (tr_ (foldMap (th_ . toHtml . fst) ps))
+          makeHead :: Monad m => Text -> HtmlT m ()
+          makeHead p =
+            if p == fst (Player.getPlayerData you fp)
+              then th_ [class_ "you"] (toHtml p)
+              else th_ (toHtml p)
+      thead_ (tr_ (foldMap (makeHead . fst) ps))
       tbody_ (tr_ (foldMap (td_ . toHtml . show . getSum . snd) ps))
   toHtmlRaw = toHtml
 
