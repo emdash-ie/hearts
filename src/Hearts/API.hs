@@ -37,7 +37,6 @@ import Data.Maybe (fromMaybe)
 import Data.Monoid (Sum (..))
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Data.UUID (UUID)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
@@ -79,6 +78,8 @@ import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm)
 
 import Hearts.Card (Card, cardHtml, faceDownCard)
+import qualified Hearts.Game as Game
+import qualified Hearts.Game.ID as Game.ID
 import Hearts.Player (Player)
 import qualified Hearts.Player as Player
 import Hearts.Player.Event (DealEvent (..), StartEvent (..))
@@ -98,10 +99,10 @@ type GameAPI =
   QueryParam "playerId" Player.Id
     :> PostRedirectGet '[JSON, HTML] CreateResult
     :<|> QueryParam "playerId" Player.Id
-      :> Capture "gameId" UUID
+      :> Capture "gameID" Game.ID
       :> Get '[JSON, HTML] GameResult
     :<|> QueryParam "playerId" Player.Id
-      :> Capture "gameId" UUID
+      :> Capture "gameID" Game.ID
       :> "play"
       :> ReqBody '[FormUrlEncoded] CardSelection
       :> PostRedirectGet '[JSON, HTML] PlayResult
@@ -225,20 +226,20 @@ instance ToHtml RoomResponse where
       unless (Vector.null games) do
         p_ "The games in this room so far are:"
         ul_ do
-          foldMap (\g -> li_ (a_ [href_ (gameHref g)] (toHtml (show g)))) games
+          foldMap (\g -> li_ (a_ [href_ (gameHref g)] (toHtml ("Game " <> Game.ID.toNumeral g)))) games
       ul_ do
         maybe mempty toHtml startGame
         li_ (a_ [href_ (fullUrl refresh)] "Check for updates")
     where
-      gameHref :: UUID -> Text
+      gameHref :: Game.ID -> Text
       gameHref g =
-        "game/" <> Text.pack (show g)
+        "game/" <> toUrlPiece g
           <> "?playerId="
           <> Text.pack (show (coerce assignedId :: Integer))
   toHtmlRaw = toHtml
 
 data CreateResult = CreateResult
-  { gameId :: UUID
+  { gameID :: Game.ID
   , startEvent :: StartEvent
   , dealEvent :: DealEvent
   }
@@ -249,17 +250,17 @@ instance Aeson.ToJSON CreateResult
 instance ToHtml CreateResult where
   toHtml
     CreateResult
-      { gameId
+      { gameID
       , startEvent = StartEvent{players}
       , dealEvent = DealEvent{hand}
       } = withCSS "./" $ main_ do
-      p_ ("Created a game with ID: " <> toHtml (show gameId))
+      p_ ("Created a game with ID: " <> toHtml (show gameID))
       p_ ("The players in this game are: " <> toHtml (show players))
       p_ ("Your hand is: " <> toHtml (show hand))
   toHtmlRaw = toHtml
 
 data GameResult = GameResult
-  { gameId :: UUID
+  { gameID :: Game.ID
   , usernames :: Player.FourPlayers Text
   , game :: Player.Game
   , playingNext :: Maybe Player.PlayerIndex
@@ -273,7 +274,7 @@ instance Aeson.ToJSON GameResult
 instance ToHtml GameResult where
   toHtml
     GameResult
-      { gameId
+      { gameID
       , usernames
       , game = Player.Game{players, hand, scores, trick, tricks}
       , playingNext
@@ -282,7 +283,7 @@ instance ToHtml GameResult where
       } = withCSS "../" do
       h1_ "Hearts"
       let username = Player.getPlayerData you usernames
-      p_ ("Welcome to game " <> toHtml (show gameId) <> ", " <> toHtml username <> "!")
+      p_ ("Welcome to game " <> toHtml (Game.ID.toNumeral gameID) <> ", " <> toHtml username <> "!")
       h2_ "Scores:"
       toHtml (ScoreTable (you, (,) <$> usernames <*> scores))
       case trick of

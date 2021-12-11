@@ -19,6 +19,7 @@ library
       Hearts.API
       Hearts.Card
       Hearts.Game.Event
+      Hearts.Game.ID
       Hearts.Player
       Hearts.Player.Event
       Hearts.Player.Id
@@ -40,7 +41,6 @@ library
       servant-server,
       text,
       transformers,
-      uuid,
       vector,
       wai-extra,
       warp,

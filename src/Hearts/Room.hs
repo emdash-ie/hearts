@@ -18,17 +18,17 @@ import Data.Foldable (foldl')
 import Data.Generics.Product (field)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Data.UUID (UUID)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 
+import qualified Hearts.Game as Game
 import Hearts.Player (Player (Player))
 import qualified Hearts.Player as Player
 
 data Room = Room
   { players :: Vector Player
-  , games :: Vector UUID
+  , games :: Vector Game.ID
   }
   deriving (Generic)
 
@@ -37,7 +37,7 @@ instance Aeson.ToJSON Room
 data Event
   = Join Player.Id Username
   | Leave Player.Id
-  | StartGame UUID
+  | StartGame Game.ID
 
 type Username = Text
 

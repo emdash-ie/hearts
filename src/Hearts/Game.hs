@@ -17,6 +17,7 @@ module Hearts.Game (
   Event,
   processEvent,
   Game (..),
+  ID,
   dealAmong4,
   sortHand,
   foldEvents,
@@ -26,6 +27,7 @@ module Hearts.Game (
 ) where
 
 import Control.Applicative ((<|>))
+import Control.Category ((>>>))
 import Control.Lens (ASetter, ASetter', over, set, to, (%~), (.~), (?~), (^.), _2, _Just)
 import Control.Monad (guard)
 import Data.Aeson ((.=))
@@ -43,10 +45,10 @@ import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
 
-import Control.Category ((>>>))
 import Hearts.Card
 import qualified Hearts.Card as Card
 import Hearts.Game.Event
+import Hearts.Game.ID (ID)
 import Hearts.Player (FourPlayers (..), PlayerIndex (..), ThreePlayers (..), Trick, playerData)
 import qualified Hearts.Player as Player
 

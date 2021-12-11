@@ -17,9 +17,6 @@ import Data.Bifunctor (bimap, first)
 import Data.Coerce (coerce)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import qualified Data.Text as Text
-import Data.UUID (UUID)
-import qualified Data.UUID.V4 as UUID
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Conc (STM, TVar, atomically, newTVarIO, readTVar, writeTVar)
@@ -32,6 +29,7 @@ import qualified Hearts.API as API
 import Hearts.Game (Game (Game))
 import qualified Hearts.Game as Game
 import qualified Hearts.Game.Event as Event
+import qualified Hearts.Game.ID as Game.ID
 import qualified Hearts.Player as Player
 import qualified Hearts.Player.Event as PlayerEvent
 import Hearts.Player.Id (Id (..))
@@ -42,7 +40,8 @@ runServer :: IO ()
 runServer = do
   roomVar <- newTVarIO Vector.empty
   gameVar <- newTVarIO Map.empty
-  run 9999 (logStdoutDev (app (ServerState roomVar gameVar)))
+  gameIdVar <- newTVarIO Game.ID.first
+  run 9999 (logStdoutDev (app (ServerState roomVar gameVar gameIdVar)))
 
 server :: ServerT HeartsAPI AppM
 server =
@@ -67,7 +66,8 @@ type AppM = ReaderT ServerState Handler
 
 data ServerState = ServerState
   { roomEvents :: TVar (Vector Room.Event)
-  , gameEvents :: TVar (Map UUID (Vector Game.Event))
+  , gameEvents :: TVar (Map Game.ID (Vector Game.Event))
+  , nextGameID :: TVar Game.ID
   }
 
 root :: AppM API.RootResponse
@@ -164,7 +164,7 @@ create :: Maybe Player.Id -> AppM (API.WithLocation API.CreateResult)
 create (Just playerId) = do
   roomVar <- asks roomEvents
   gameVar <- asks gameEvents
-  gameId <- liftIO UUID.nextRandom
+  gameIdVar <- asks nextGameID
   deck <- liftIO Event.shuffledDeck
   withRoom \Room{players} ->
     case Player.takeFour players of
@@ -184,8 +184,9 @@ create (Just playerId) = do
         Just playerIndex -> do
           roomEvents' <- readTVar roomVar
           gameMap <- readTVar gameVar
+          gameID <- readTVar gameIdVar
           -- append the new room event
-          writeTVar roomVar (Vector.snoc roomEvents' (Room.StartGame gameId))
+          writeTVar roomVar (Vector.snoc roomEvents' (Room.StartGame gameID))
           -- append the new game events
           let gameStartEvent = Event.StartEvent (Player.id <$> fourPlayers)
           let gameStartEvent' = Event.Start gameStartEvent
@@ -196,22 +197,23 @@ create (Just playerId) = do
                   [ gameStartEvent'
                   , gameDealEvent'
                   ]
-          writeTVar gameVar (Map.insert gameId es gameMap)
+          writeTVar gameVar (Map.insert gameID es gameMap)
+          writeTVar gameIdVar (Game.ID.next gameID)
           -- return the create result
           let startEvent = PlayerEvent.fromGameStartEvent gameStartEvent
           let dealEvent = PlayerEvent.fromGameDealEvent playerIndex gameDealEvent
           pure $
             Right $
               addHeader
-                ( "game/" <> toQueryParam gameId
+                ( "game/" <> toQueryParam gameID
                     <> "?playerId="
                     <> toQueryParam playerId
                 )
                 API.CreateResult{..}
 create Nothing = throwError err400{errBody = "You must provide a player ID"}
 
-gameEndpoint :: Maybe Player.Id -> UUID -> AppM API.GameResult
-gameEndpoint (Just playerId) gameId = do
+gameEndpoint :: Maybe Player.Id -> Game.ID -> AppM API.GameResult
+gameEndpoint (Just playerId) gameID = do
   gameVar <- asks gameEvents
   withRoom \Room{players} ->
     case Player.takeFour players of
@@ -231,7 +233,7 @@ gameEndpoint (Just playerId) gameId = do
                   }
           Just playerIndex -> do
             gameMap <- readTVar gameVar
-            case Map.lookup gameId gameMap >>= Vector.uncons of
+            case Map.lookup gameID gameMap >>= Vector.uncons of
               Nothing -> pure (Left err404)
               Just gameEvents ->
                 case Game.foldEvents Nothing gameEvents of
@@ -250,7 +252,7 @@ gameEndpoint (Just playerId) gameId = do
                           ( API.Action
                               { name = "Play card"
                               , description = "Play card"
-                              , url = "/game/" <> Text.pack (show gameId) <> "/play"
+                              , url = "/game/" <> Game.ID.toNumeral gameID <> "/play"
                               , method = API.Post
                               , parameters = [("playerId", toQueryParam playerId)]
                               , inputs = []
@@ -259,7 +261,7 @@ gameEndpoint (Just playerId) gameId = do
                     pure $
                       Right
                         ( API.GameResult
-                            { gameId
+                            { gameID
                             , usernames = Player.username <$> fourPlayers
                             , game = Game.toPlayerGame playerIndex game
                             , playingNext = Game.playingNext game
@@ -290,12 +292,12 @@ withRoom useRoom = do
 
 playEndpoint ::
   Maybe Id ->
-  UUID ->
+  Game.ID ->
   API.CardSelection ->
   AppM (API.WithLocation API.PlayResult)
-playEndpoint (Just player) gameId (API.CardSelection card) = do
+playEndpoint (Just player) gameID (API.CardSelection card) = do
   gameVar <- asks gameEvents
-  withGame gameId \game@Game{} ->
+  withGame gameID \game@Game{} ->
     if Game.playingNext' game /= Just player
       then
         pure
@@ -311,16 +313,16 @@ playEndpoint (Just player) gameId (API.CardSelection card) = do
       else do
         let e = Event.Play (Event.PlayEvent card)
         gameMap <- readTVar gameVar
-        case Map.lookup gameId gameMap >>= Vector.uncons of
-          Nothing -> pure (Left (err400{errBody = "Game " <> Aeson.encode gameId <> " not found!"}))
+        case Map.lookup gameID gameMap >>= Vector.uncons of
+          Nothing -> pure (Left (err400{errBody = "Game " <> Aeson.encode gameID <> " not found!"}))
           Just (e', es) -> case Game.foldEvents Nothing (e', Vector.snoc es e) of
             Left err -> pure (Left (err400{errBody = "Couldn't apply event: " <> Aeson.encode err}))
             Right _ -> do
-              writeTVar gameVar (Map.adjust (`Vector.snoc` e) gameId gameMap)
+              writeTVar gameVar (Map.adjust (`Vector.snoc` e) gameID gameMap)
               pure
                 ( Right
                     ( addHeader
-                        ( "/game/" <> toQueryParam gameId
+                        ( "/game/" <> toQueryParam gameID
                             <> "?playerId="
                             <> toQueryParam player
                         )
@@ -329,8 +331,8 @@ playEndpoint (Just player) gameId (API.CardSelection card) = do
                 )
 playEndpoint Nothing _ _ = throwError err400{errBody = "You must provide a player ID"}
 
-withGame :: UUID -> (Game -> STM (Either ServerError a)) -> AppM a
-withGame gameId useGame = do
+withGame :: Game.ID -> (Game -> STM (Either ServerError a)) -> AppM a
+withGame gameID useGame = do
   gameVar <- asks gameEvents
   result <- liftIO $ atomically do
     gameMap <- readTVar gameVar
@@ -340,7 +342,7 @@ withGame gameId useGame = do
         ( maybe
             (Left (err400{errBody = "Game not found"}))
             Right
-            (Map.lookup gameId gameMap >>= Vector.uncons)
+            (Map.lookup gameID gameMap >>= Vector.uncons)
             >>= (first gameError . Game.foldEvents Nothing)
         )
   either throwError pure result
