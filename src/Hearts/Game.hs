@@ -180,9 +180,7 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
 -- | Played next, would this card follow suit (or not) correctly?
 checkFollowingSuit :: Game -> FourPlayers (Vector Card) -> PlayerIndex -> Card -> Bool
 checkFollowingSuit game hands nextPlayer card =
-  if shouldFollowSuit
-    then isFollowingSuit
-    else True
+  isFollowingSuit || not shouldFollowSuit
   where
     firstCard :: Maybe Card
     firstCard = do
