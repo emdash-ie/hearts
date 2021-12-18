@@ -1,11 +1,9 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TypeApplications #-}
 
 module Hearts.Server (runServer) where
 
@@ -15,8 +13,10 @@ import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (bimap, first)
 import Data.Coerce (coerce)
+import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Monoid (Sum (Sum))
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Conc (STM, TVar, atomically, newTVarIO, readTVar, writeTVar)
@@ -297,7 +297,8 @@ playEndpoint ::
   AppM (API.WithLocation API.PlayResult)
 playEndpoint (Just player) gameID (API.CardSelection card) = do
   gameVar <- asks gameEvents
-  withGame gameID \game@Game{} ->
+  deck <- liftIO Event.shuffledDeck
+  withGame gameID \game@Game{hands} ->
     if Game.playingNext' game /= Just player
       then
         pure
@@ -311,14 +312,20 @@ playEndpoint (Just player) gameID (API.CardSelection card) = do
               )
           )
       else do
-        let e = Event.Play (Event.PlayEvent card)
+        let newEvents =
+              Vector.cons
+                (Event.Play (Event.PlayEvent card))
+                ( if foldMap (Sum . Vector.length) (maybe [] toList hands) == Sum 1
+                    then Vector.singleton (Event.Deal (Event.DealEvent deck))
+                    else Vector.empty
+                )
         gameMap <- readTVar gameVar
         case Map.lookup gameID gameMap >>= Vector.uncons of
           Nothing -> pure (Left (err400{errBody = "Game " <> Aeson.encode gameID <> " not found!"}))
-          Just (e', es) -> case Game.foldEvents Nothing (e', Vector.snoc es e) of
+          Just (e', es) -> case Game.foldEvents Nothing (e', es <> newEvents) of
             Left err -> pure (Left (err400{errBody = "Couldn't apply event: " <> Aeson.encode err}))
             Right _ -> do
-              writeTVar gameVar (Map.adjust (`Vector.snoc` e) gameID gameMap)
+              writeTVar gameVar (Map.adjust (<> newEvents) gameID gameMap)
               pure
                 ( Right
                     ( addHeader
