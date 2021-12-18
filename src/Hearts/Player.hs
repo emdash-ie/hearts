@@ -47,6 +47,7 @@ data Game = Game
   , hand :: Maybe (Vector Card)
   , trick :: Maybe (Trick Maybe)
   , tricks :: Maybe (Vector (Trick Identity))
+  , heartsBroken :: Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -58,6 +59,7 @@ instance Aeson.ToJSON Game where
       , "hand" .= hand
       , "trick" .= trick
       , "tricks" .= tricks
+      , "heartsBroken" .= heartsBroken
       ]
 
 type Trick m =

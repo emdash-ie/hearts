@@ -26,8 +26,21 @@ module Hearts.Game (
 
 import Control.Applicative ((<|>))
 import Control.Category ((>>>))
-import Control.Lens (ASetter, ASetter', over, set, to, (%~), (.~), (?~), (^.), _2, _Just)
-import Control.Monad (guard)
+import Control.Lens (
+  ASetter,
+  ASetter',
+  over,
+  set,
+  to,
+  view,
+  (%~),
+  (.~),
+  (?~),
+  (^.),
+  _2,
+  _Just,
+ )
+import Control.Monad (guard, when)
 import Data.Aeson ((.=))
 import qualified Data.Aeson as Aeson
 import Data.Foldable (foldl', toList)
@@ -56,6 +69,7 @@ data Game = Game
   , hands :: Maybe (FourPlayers (Vector Card))
   , trick :: Maybe (Trick Maybe)
   , tricks :: Maybe (Vector (Trick Identity))
+  , heartsBroken :: Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -67,6 +81,7 @@ instance Aeson.ToJSON Game where
       , "hands" .= hands
       , "trick" .= trick
       , "tricks" .= tricks
+      , "heartsBroken" .= heartsBroken
       ]
 
 toPlayerGame :: PlayerIndex -> Game -> Player.Game
@@ -91,6 +106,8 @@ instance Aeson.ToJSON FoldError
 data PlayError
   = -- | This play is invalid because it does not follow suit.
     NotFollowingSuit
+  | -- | This play is invalid because it breaks hearts incorrectly.
+    BreakingHeartsIncorrectly
   deriving (Show, Generic)
 
 instance Aeson.ToJSON PlayError
@@ -118,6 +135,7 @@ processEvent Nothing (Start StartEvent{..}) =
       , hands = Nothing
       , trick = Nothing
       , tricks = Nothing
+      , heartsBroken = False
       }
 processEvent Nothing event = Left (GameNotStarted event)
 processEvent (Just game) (Start event) = Left (GameAlreadyStarted game event)
@@ -165,17 +183,44 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
       playCard :: Game -> Game
       playCard g = fromMaybe g do
         index <- playingNext g
-        let addCardToTrick = field @"trick" . _Just . _2 . playerData index ?~ card
-        let removeCardFromHand = field @"hands" . _Just . playerData index %~ Vector.filter (/= card)
-        pure ((removeCardFromHand >>> addCardToTrick) g)
-      checkFollowingSuit' :: Bool
-      checkFollowingSuit' = fromMaybe False do
+        let addCardToTrick =
+              field @"trick" . _Just . _2 . playerData index
+                ?~ card
+        let removeCardFromHand =
+              field @"hands" . _Just . playerData index
+                %~ Vector.filter (/= card)
+        pure ((removeCardFromHand >>> addCardToTrick >>> maybeBreakHearts) g)
+      maybeBreakHearts :: Game -> Game
+      maybeBreakHearts g =
+        set (field @"heartsBroken") (heartsBroken g || suit card == Hearts) g
+      notFollowingSuitWhenRequired :: Bool
+      notFollowingSuitWhenRequired = fromMaybe False do
         hands <- game ^. field @"hands"
         next <- playingNext game
-        pure (checkFollowingSuit game hands next card)
-   in if checkFollowingSuit'
-        then Right (maybeScoreHand (maybeDiscardTrick (playCard game)))
-        else Left (PlayInvalid NotFollowingSuit game playEvent)
+        pure (not (checkFollowingSuit game hands next card))
+      breakingHeartsIncorrectly :: Bool
+      breakingHeartsIncorrectly =
+        leading && suit card == Hearts
+          && not (heartsBroken game)
+          && hasNonHearts
+      leading :: Bool
+      leading =
+        all
+          isNothing
+          (maybe [Nothing] (toList . snd) (game ^. field @"trick"))
+      hasNonHearts :: Bool
+      hasNonHearts = fromMaybe False do
+        index <- playingNext game
+        playerHand <- view (playerData index) <$> (game ^. field @"hands")
+        pure (any ((/= Hearts) . suit) playerHand)
+   in do
+        when
+          notFollowingSuitWhenRequired
+          (Left (PlayInvalid NotFollowingSuit game playEvent))
+        when
+          breakingHeartsIncorrectly
+          (Left (PlayInvalid BreakingHeartsIncorrectly game playEvent))
+        Right (maybeScoreHand (maybeDiscardTrick (playCard game)))
 
 -- | Played next, would this card follow suit (or not) correctly?
 checkFollowingSuit :: Game -> FourPlayers (Vector Card) -> PlayerIndex -> Card -> Bool
