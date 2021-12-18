@@ -20,7 +20,7 @@ import Data.Monoid (Sum)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import GHC.Generics (Generic)
-import Lucid (HtmlT, ToHtml (..), span_, style_)
+import Lucid (HtmlT, ToHtml (..), class_, span_)
 import Servant (FromHttpApiData, ToHttpApiData, toUrlPiece)
 import Servant.API (parseUrlPiece)
 
@@ -86,22 +86,21 @@ instance Aeson.ToJSON Card
 
 instance ToHtml Card where
   toHtml c@(Card s _) =
-    let colour =
-          "color: " <> case s of
-            Clubs -> "black"
-            Spades -> "black"
-            Diamonds -> "crimson"
-            Hearts -> "crimson"
-     in cardHtml colour (Text.pack (show c))
+    let cardClass =
+          case s of
+            Clubs -> "clubs"
+            Spades -> "spades"
+            Diamonds -> "diamonds"
+            Hearts -> "hearts"
+     in cardHtml (Just cardClass) (Text.pack (show c))
   toHtmlRaw = toHtml
 
 faceDownCard :: Text
 faceDownCard = "🂠"
 
-cardHtml :: Monad m => Text -> Text -> HtmlT m ()
-cardHtml colour t =
-  let size = "font-size: 100px;"
-   in span_ [style_ (size <> colour)] (toHtml t)
+cardHtml :: Monad m => Maybe Text -> Text -> HtmlT m ()
+cardHtml extraClass c =
+  span_ [class_ ("card" <> maybe "" (" " <>) extraClass)] (toHtml c)
 
 instance FromHttpApiData Card where
   parseUrlPiece p =

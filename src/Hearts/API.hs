@@ -280,7 +280,7 @@ instance ToHtml GameResult where
       , playingNext
       , you
       , playCard
-      } = withCSS "../" do
+      } = withCSS "../" $ main_ do
       h1_ "Hearts"
       let username = Player.getPlayerData you usernames
       p_ ("Welcome to game " <> toHtml (Game.ID.toNumeral gameID) <> ", " <> toHtml username <> "!")
@@ -304,7 +304,7 @@ instance ToHtml GameResult where
                   else th_ (toHtml u)
           table_ do
             tr_ (foldMap f ((,) <$> players <*> usernames))
-            tr_ (foldMap (td_ . maybe (cardHtml "black" faceDownCard) toHtml) cards)
+            tr_ (foldMap (td_ . maybe (cardHtml Nothing faceDownCard) toHtml) cards)
       fromMaybe (pure ()) do
         h <- hand
         pure do
@@ -329,13 +329,14 @@ displayHand url hand = form_
   do
     Foldable.for_ hand \c -> do
       let i = Text.pack (show c)
-      label_ [for_ i] (toHtml c)
       input_
         [ type_ "radio"
         , name_ "card"
         , id_ i
+        , class_ "card-selector"
         , value_ (toQueryParam c)
         ]
+      label_ [for_ i, class_ "card-selector"] (toHtml c)
     input_ [type_ "submit", value_ "Play card"]
 
 newtype PlayerList = PlayerList (Player.PlayerIndex, Player.FourPlayers Player)

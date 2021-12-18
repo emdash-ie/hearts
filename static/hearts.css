@@ -1,3 +1,8 @@
-* { box-sizing: border-box; }
-main { padding: 2em; }
-th.you { text-decoration: underline; }
+* {box-sizing: border-box;}
+main {margin: 2em auto; max-width: 900px;}
+th.you {text-decoration: underline;}
+.card.hearts {color: crimson;}
+.card.diamonds {color: crimson;}
+.card {font-size: 100px;}
+input.card-selector {appearance: none;}
+input:checked + label.card-selector > span {vertical-align: 10px;}
