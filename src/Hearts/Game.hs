@@ -202,7 +202,7 @@ checkFollowingSuit game hands nextPlayer card =
 scoreTrick :: Trick Identity -> FourPlayers (Sum Integer)
 scoreTrick t =
   let w = winner t
-      winnerScore = foldMap Card.score (t ^. to snd . playerData w)
+      winnerScore = foldMap Card.score (toList (runIdentity <$> snd t))
    in set (playerData w) winnerScore (pure 0)
 
 playingNext :: Game -> Maybe PlayerIndex
