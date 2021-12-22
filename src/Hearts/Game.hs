@@ -108,6 +108,9 @@ data PlayError
     NotFollowingSuit
   | -- | This play is invalid because it breaks hearts incorrectly.
     BreakingHeartsIncorrectly
+  | -- | This play is invalid because this is the first trick in a hand and
+    -- it contains a penalty card.
+    PlayedPenaltyCardIllegally
   deriving (Show, Generic)
 
 instance Aeson.ToJSON PlayError
@@ -203,6 +206,13 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
         leading && suit card == Hearts
           && not (heartsBroken game)
           && hasNonHearts
+      playedPenaltyCardIllegally :: Bool
+      playedPenaltyCardIllegally =
+        null (tricks game) && isPenaltyCard
+      isPenaltyCard :: Bool
+      isPenaltyCard =
+        (suit card == Hearts)
+          || (suit card == Spades && value card == Queen)
       leading :: Bool
       leading =
         all
@@ -220,6 +230,9 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
         when
           breakingHeartsIncorrectly
           (Left (PlayInvalid BreakingHeartsIncorrectly game playEvent))
+        when
+          playedPenaltyCardIllegally
+          (Left (PlayInvalid PlayedPenaltyCardIllegally game playEvent))
         Right (maybeScoreHand (maybeDiscardTrick (playCard game)))
 
 -- | Played next, would this card follow suit (or not) correctly?
