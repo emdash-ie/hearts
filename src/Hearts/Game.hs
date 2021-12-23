@@ -177,10 +177,13 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
       maybeScoreHand g =
         if g ^. field @"hands" . to handIsFinished
           then fromMaybe g do
-            scores <-
+            initialScores <-
               g
                 ^. field @"tricks"
                   . to (fmap (foldMap scoreTrick))
+            let scores = case Player.findIndex (== 26) scores of
+                  Nothing -> initialScores
+                  Just i -> set (playerData i) 26 (pure 0)
             pure (over (field @"scores") (scores <>) g)
           else g
       playCard :: Game -> Game
