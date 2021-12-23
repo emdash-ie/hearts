@@ -148,7 +148,9 @@ processEvent (Just game) (Deal (DealEvent (Deck deck))) =
       initialiseTrick :: Game -> Game
       initialiseTrick =
         field @"trick" .~ fmap (,pure Nothing) (playingFirst hands)
-   in Right (initialiseTrick (updateHands game))
+      unbreakHearts :: Game -> Game
+      unbreakHearts = set (field @"heartsBroken") False
+   in Right (unbreakHearts (initialiseTrick (updateHands game)))
 processEvent (Just game) (Play playEvent@PlayEvent{card}) =
   let trickIsFinished :: Trick Maybe -> Maybe (Trick Identity)
       trickIsFinished (i, FourPlayers{..}) =
