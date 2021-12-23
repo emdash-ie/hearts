@@ -274,7 +274,7 @@ instance ToHtml GameResult where
     GameResult
       { gameID
       , usernames
-      , game = Player.Game{players, hand, scores, trick, tricks, finished}
+      , game = Player.Game{players, hand, scores, trick, lastTrick, finished}
       , playingNext
       , you
       , playCard
@@ -305,20 +305,19 @@ instance ToHtml GameResult where
           table_ do
             tr_ (foldMap f ((,) <$> players <*> usernames))
             tr_ (foldMap (td_ . maybe (cardHtml Nothing faceDownCard) toHtml) cards)
+      case lastTrick of
+        Nothing -> mempty
+        Just t -> do
+          let winner = usernames ^. Player.playerData (Game.winner t)
+          h2_ ("Last trick: " <> toHtml winner <> " won")
+          table_ do
+            tr_ (foldMap (th_ . toHtml) usernames)
+            tr_ (foldMap (td_ . toHtml . runIdentity) (snd t))
       fromMaybe (pure ()) do
         h <- hand
         pure do
           h2_ "Your hand:"
           displayHand (fullUrl playCard) h
-      case tricks of
-        Nothing -> mempty
-        Just ts -> do
-          h2_ "Past tricks:"
-          let makeRow :: Monad m => Player.Trick Identity -> HtmlT m ()
-              makeRow (_, cards) = tr_ (foldMap (td_ . toHtml . runIdentity) cards)
-          table_ do
-            tr_ (foldMap (th_ . toHtml) usernames)
-            tr_ (foldMap makeRow (Vector.reverse ts))
   toHtmlRaw = toHtml
 
 displayHand :: Monad m => Text -> Vector Card -> HtmlT m ()

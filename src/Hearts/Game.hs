@@ -22,6 +22,7 @@ module Hearts.Game (
   toPlayerGame,
   playingNext,
   playingNext',
+  winner,
 ) where
 
 import Control.Applicative ((<|>))
@@ -90,6 +91,7 @@ toPlayerGame :: PlayerIndex -> Game -> Player.Game
 toPlayerGame index Game{..} =
   Player.Game
     { hand = Player.getPlayerData index <$> hands
+    , lastTrick = fmap Vector.last tricks
     , ..
     }
 

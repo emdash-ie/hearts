@@ -46,7 +46,7 @@ data Game = Game
   , scores :: FourPlayers (Sum Integer)
   , hand :: Maybe (Vector Card)
   , trick :: Maybe (Trick Maybe)
-  , tricks :: Maybe (Vector (Trick Identity))
+  , lastTrick :: Maybe (Trick Identity)
   , heartsBroken :: Bool
   , finished :: Bool
   }
@@ -59,7 +59,7 @@ instance Aeson.ToJSON Game where
       , "scores" .= fmap getSum scores
       , "hand" .= hand
       , "trick" .= trick
-      , "tricks" .= tricks
+      , "lastTrick" .= lastTrick
       , "heartsBroken" .= heartsBroken
       , "finished" .= finished
       ]
