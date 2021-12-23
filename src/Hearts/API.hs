@@ -24,7 +24,7 @@ module Hearts.API (
 ) where
 
 import Control.Lens (Identity (runIdentity), (%~), (^.))
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import qualified Data.Aeson as Aeson
 import Data.Bool (bool)
 import Data.Coerce (coerce)
@@ -274,7 +274,7 @@ instance ToHtml GameResult where
     GameResult
       { gameID
       , usernames
-      , game = Player.Game{players, hand, scores, trick, tricks}
+      , game = Player.Game{players, hand, scores, trick, tricks, finished}
       , playingNext
       , you
       , playCard
@@ -282,6 +282,8 @@ instance ToHtml GameResult where
       h1_ "Hearts"
       let username = Player.getPlayerData you usernames
       p_ ("Welcome to game " <> toHtml (Game.ID.toNumeral gameID) <> ", " <> toHtml username <> "!")
+      when finished do
+        p_ "This game is over!"
       h2_ "Scores:"
       toHtml (ScoreTable (you, (,) <$> usernames <*> scores))
       case trick of

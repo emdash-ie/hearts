@@ -70,6 +70,7 @@ data Game = Game
   , trick :: Maybe (Trick Maybe)
   , tricks :: Maybe (Vector (Trick Identity))
   , heartsBroken :: Bool
+  , finished :: Bool
   }
   deriving (Show, Eq, Generic)
 
@@ -82,6 +83,7 @@ instance Aeson.ToJSON Game where
       , "trick" .= trick
       , "tricks" .= tricks
       , "heartsBroken" .= heartsBroken
+      , "finished" .= finished
       ]
 
 toPlayerGame :: PlayerIndex -> Game -> Player.Game
@@ -97,6 +99,8 @@ data FoldError
     GameNotStarted Event
   | -- | This 'Game' has already started, so this 'StartEvent' can't be applied.
     GameAlreadyStarted Game StartEvent
+  | -- | This 'Game' is finished, so this event can't be applied.
+    GameFinished Game Event
   | -- | This play can't be made with this game state.
     PlayInvalid PlayError Game PlayEvent
   deriving (Show, Generic)
@@ -139,9 +143,11 @@ processEvent Nothing (Start StartEvent{..}) =
       , trick = Nothing
       , tricks = Nothing
       , heartsBroken = False
+      , finished = False
       }
 processEvent Nothing event = Left (GameNotStarted event)
 processEvent (Just game) (Start event) = Left (GameAlreadyStarted game event)
+processEvent (Just game) event | finished game = Left (GameFinished game event)
 processEvent (Just game) (Deal (DealEvent (Deck deck))) =
   let hands = sortHand <$> dealAmong4 deck
       updateHands = field @"hands" .~ Just hands
@@ -186,7 +192,10 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
             let scores = case Player.findIndex (== 26) scores of
                   Nothing -> initialScores
                   Just i -> set (playerData i) 26 (pure 0)
-            pure (over (field @"scores") (scores <>) g)
+            let newGame = over (field @"scores") (scores <>) g
+            pure $ case Player.findIndex (>= 100) (g ^. field @"scores") of
+              Nothing -> newGame
+              Just _ -> set (field @"finished") True newGame
           else g
       playCard :: Game -> Game
       playCard g = fromMaybe g do
