@@ -27,7 +27,6 @@ import Control.Lens (Identity (runIdentity), (%~), (^.))
 import Control.Monad (unless, when)
 import qualified Data.Aeson as Aeson
 import Data.Bool (bool)
-import Data.Coerce (coerce)
 import qualified Data.Foldable as Foldable
 import Data.Function ((&))
 import Data.Generics.Product (field)
@@ -75,6 +74,8 @@ import Servant hiding (Required)
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm)
 
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Hearts.Card (Card, cardHtml, faceDownCard)
 import qualified Hearts.Game as Game
 import qualified Hearts.Game.ID as Game.ID
@@ -82,16 +83,24 @@ import Hearts.Player (Player)
 import qualified Hearts.Player as Player
 import Hearts.Player.Event (DealEvent (..), StartEvent (..))
 import Hearts.Room (Room (..))
+import qualified Hearts.Room as Room
 
 type HeartsAPI =
   Get '[JSON, HTML] RootResponse
     :<|> "static" :> Raw
-    :<|> "join"
-      :> ReqBody '[JSON, FormUrlEncoded] JoinRequest
-      :> PostRedirectGet '[JSON, HTML] RoomResponse
-    :<|> "room" :> QueryParam "playerId" Player.Id
-      :> Get '[JSON, HTML] RoomResponse
-    :<|> "game" :> GameAPI
+    :<|> "room" :> RoomAPI
+
+type RoomAPI =
+  ReqBody '[JSON, FormUrlEncoded] JoinRequest
+    :> PostRedirectGet '[JSON, HTML] RoomResponse
+    :<|> Capture "roomName" Text
+      :> ( QueryParam "playerId" Player.Id
+            :> Get '[JSON, HTML] RoomResponse
+            :<|> "join"
+              :> ReqBody '[JSON, FormUrlEncoded] JoinRequest
+              :> PostRedirectGet '[JSON, HTML] RoomResponse
+            :<|> "game" :> GameAPI
+         )
 
 type GameAPI =
   QueryParam "playerId" Player.Id
@@ -163,10 +172,12 @@ instance Aeson.ToJSON Method
 
 data Input
   = TextInput Name Label Required
+  | HiddenInput Name Value Required
   deriving (Show, Eq, Generic)
 
 type Name = Text
 type Label = Text
+type Value = Text
 type Required = Bool
 
 instance Aeson.ToJSON Input
@@ -180,25 +191,44 @@ instance ToHtml Input where
       , id_ name
       , required_ (bool "false" "true" required)
       ]
+  toHtml (HiddenInput name value required) = fieldset_ do
+    input_
+      [ type_ "hidden"
+      , name_ name
+      , value_ value
+      , required_ (bool "false" "true" required)
+      ]
 
   toHtmlRaw = toHtml
 
-newtype RootResponse = RootResponse
-  { joinRoom :: Action
+data RootResponse = RootResponse
+  { rooms :: Vector (Text, Either Room.FoldError Room)
+  , createRoom :: Action
+  , joinRoom :: Map Text Action
   }
   deriving (Generic)
 
 instance Aeson.ToJSON RootResponse
 
 instance ToHtml RootResponse where
-  toHtml RootResponse{joinRoom} = withCSS "./" $ main_ do
-    p_ "Welcome to the Hearts server!"
-    p_ "Please join a room to play a game:"
-    toHtml joinRoom
+  toHtml RootResponse{rooms, createRoom, joinRoom} =
+    withCSS "./" $ main_ do
+      p_ "Welcome to the Hearts server!"
+      p_ "You can join one of the following rooms to play:"
+      ul_ do
+        foldMap roomHtml rooms
+      p_ "Alternatively, you can create a new room:"
+      toHtml createRoom
+    where
+      roomHtml :: Monad m => (Text, Either Room.FoldError Room) -> HtmlT m ()
+      roomHtml (name, _) = do
+        li_ (toHtml name)
+        maybe mempty toHtml (Map.lookup name joinRoom)
   toHtmlRaw = toHtml
 
-newtype JoinRequest = JoinRequest
+data JoinRequest = JoinRequest
   { username :: Text
+  , roomName :: Text
   }
   deriving (Show, Eq, Generic)
 
@@ -218,7 +248,7 @@ instance Aeson.ToJSON RoomResponse
 
 instance ToHtml RoomResponse where
   toHtml RoomResponse{room = Room{players, games}, assignedId, startGame, refresh} =
-    withCSS "./" $ main_ do
+    withCSS "../../" $ main_ do
       p_ ("Your assigned ID is: " <> toHtml (show assignedId))
       p_ ("The players in this room are: " <> toHtml (show players))
       unless (Vector.null games) do
@@ -232,8 +262,8 @@ instance ToHtml RoomResponse where
       gameHref :: Game.ID -> Text
       gameHref g =
         "game/" <> toUrlPiece g
-          <> "?playerId="
-          <> Text.pack (show (coerce assignedId :: Integer))
+          <> "/?playerId="
+          <> toUrlPiece assignedId
   toHtmlRaw = toHtml
 
 data CreateResult = CreateResult
@@ -278,7 +308,7 @@ instance ToHtml GameResult where
       , playingNext
       , you
       , playCard
-      } = withCSS "../" $ main_ do
+      } = withCSS "../../../../" $ main_ do
       h1_ "Hearts"
       let username = Player.getPlayerData you usernames
       p_ ("Welcome to game " <> toHtml (Game.ID.toNumeral gameID) <> ", " <> toHtml username <> "!")

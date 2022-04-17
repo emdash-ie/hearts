@@ -12,7 +12,7 @@
 
 module Hearts.Player (
   Player (..),
-  Id (..),
+  Id,
   Game (..),
   Trick,
   FourPlayers (..),

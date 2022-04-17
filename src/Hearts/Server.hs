@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections #-}
 
 module Hearts.Server (runServer) where
 
@@ -11,19 +12,23 @@ import qualified Control.Monad as Monad
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import qualified Data.Aeson as Aeson
-import Data.Bifunctor (bimap, first)
-import Data.Coerce (coerce)
+import Data.Bifunctor (first)
 import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Monoid (Sum (Sum))
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
-import GHC.Conc (STM, TVar, atomically, newTVarIO, readTVar, writeTVar)
+import GHC.Conc (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
+import Control.Category ((>>>))
+import Data.Maybe (catMaybes)
+import Data.Text (Text)
+import Data.Text.Lazy (fromStrict)
+import Data.Text.Lazy.Encoding (encodeUtf8)
 import Hearts.API (HeartsAPI, RoomResponse (..))
 import qualified Hearts.API as API
 import Hearts.Game (Game (Game))
@@ -32,26 +37,31 @@ import qualified Hearts.Game.Event as Event
 import qualified Hearts.Game.ID as Game.ID
 import qualified Hearts.Player as Player
 import qualified Hearts.Player.Event as PlayerEvent
-import Hearts.Player.Id (Id (..))
+import Hearts.Player.Id (Id)
+import qualified Hearts.Player.Id as Player.Id
 import Hearts.Room (Room (Room))
 import qualified Hearts.Room as Room
 
 runServer :: IO ()
 runServer = do
-  roomVar <- newTVarIO Vector.empty
+  roomVar <- newTVarIO Map.empty
   gameVar <- newTVarIO Map.empty
   gameIdVar <- newTVarIO Game.ID.first
-  run 9999 (logStdoutDev (app (ServerState roomVar gameVar gameIdVar)))
+  playerIdVar <- newTVarIO Player.Id.first
+  run 9999 (logStdoutDev (app (ServerState roomVar gameVar gameIdVar playerIdVar)))
 
 server :: ServerT HeartsAPI AppM
 server =
   root
     :<|> serveDirectoryWebApp "static"
-    :<|> join
-    :<|> roomEndpoint
-    :<|> create
-    :<|> gameEndpoint
-    :<|> playEndpoint
+    :<|> createRoom
+    :<|> ( \roomName ->
+            roomEndpoint roomName
+              :<|> join roomName
+              :<|> create roomName
+              :<|> gameEndpoint roomName
+              :<|> playEndpoint
+         )
 
 heartsAPI :: Proxy HeartsAPI
 heartsAPI = Proxy
@@ -65,57 +75,116 @@ nt s x = runReaderT x s
 type AppM = ReaderT ServerState Handler
 
 data ServerState = ServerState
-  { roomEvents :: TVar (Vector Room.Event)
+  { roomEvents :: TVar (Map Text (Vector Room.Event))
   , gameEvents :: TVar (Map Game.ID (Vector Game.Event))
   , nextGameID :: TVar Game.ID
+  , nextPlayerID :: TVar Player.Id
   }
 
 root :: AppM API.RootResponse
-root =
+root = do
+  roomMap <- asks (roomEvents >>> readTVarIO) >>= liftIO
+  let rooms = (Vector.fromList . catMaybes) do
+        (roomName, events) <- Map.toList roomMap
+        pure do
+          t <- Vector.uncons events
+          pure (roomName, Room.foldEvents Nothing t)
   pure
     ( API.RootResponse
-        { joinRoom =
+        { createRoom =
             API.Action
-              { name = "Join room"
-              , description = "Join room"
-              , url = "join"
+              { name = "Create room"
+              , description = "Create a room"
+              , url = "room"
               , method = API.Post
               , parameters = []
-              , inputs = [API.TextInput "username" "Username:" True]
+              , inputs =
+                  [ API.TextInput "username" "Username:" True
+                  , API.TextInput "roomName" "Room name:" True
+                  ]
               }
+        , joinRoom =
+            (Map.fromList . catMaybes)
+              [ either (const Nothing) (Just . (name,) . roomAction) roomOrError
+              | (name, roomOrError) <- toList rooms
+              ]
+        , rooms
         }
     )
+  where
+    roomAction :: Room -> API.Action
+    roomAction Room{name} =
+      API.Action
+        { name = "Join room"
+        , description = "Join this room"
+        , url = "room/" <> name <> "/join"
+        , method = API.Post
+        , parameters = []
+        , inputs =
+            [ API.TextInput "username" "Username:" True
+            , API.HiddenInput "roomName" name True
+            ]
+        }
 
-join :: API.JoinRequest -> AppM (API.WithLocation API.RoomResponse)
-join API.JoinRequest{username} = do
+createRoom :: API.JoinRequest -> AppM (API.WithLocation API.RoomResponse)
+createRoom joinRequest@API.JoinRequest{roomName} = do
   roomVar <- asks roomEvents
-  withRoom \room@Room{players} -> do
-    let newId = Id (maximum (Vector.cons 0 (coerce (Player.id <$> players))) + 1)
+  result <- (liftIO . atomically) do
+    roomMap <- readTVar roomVar
+    case Map.lookup roomName roomMap of
+      Nothing -> do
+        let createEvent = Vector.singleton (Room.Create roomName)
+        writeTVar roomVar (Map.insert roomName createEvent roomMap)
+        pure (Right ())
+      Just _ -> pure (Left roomExistsError)
+  case result of
+    Left e -> throwError e
+    Right () -> do
+      (assignedId, roomResponse) <- join' roomName joinRequest
+      pure $
+        addHeader
+          ("room/" <> roomName <> "/?playerId=" <> toQueryParam assignedId)
+          roomResponse
+  where
+    roomExistsError = err400{errBody = "Error: Room " <> encodeUtf8 (fromStrict roomName) <> " already exists!"}
+
+join :: Text -> API.JoinRequest -> AppM (API.WithLocation API.RoomResponse)
+join roomName joinRequest = do
+  (assignedId, roomResponse) <- join' roomName joinRequest
+  pure $
+    addHeader
+      ("./?playerId=" <> toQueryParam assignedId)
+      roomResponse
+
+join' :: Text -> API.JoinRequest -> AppM (Player.Id, API.RoomResponse)
+join' roomName API.JoinRequest{username} = do
+  roomVar <- asks roomEvents
+  playerIdVar <- asks nextPlayerID
+  withRoom roomName \room@Room{players} -> do
+    newId <- readTVar playerIdVar
     let joinEvent = Room.Join newId username
-    events <- readTVar roomVar
-    writeTVar roomVar (Vector.snoc events joinEvent)
-    pure
-      ( bimap
-          makeError
-          (makeResponse (Player.id <$> players) newId)
-          (Room.processEvent room joinEvent)
-      )
+    roomMap <- readTVar roomVar
+    let newMap = Map.alter (pure . maybe (Vector.singleton joinEvent) (`Vector.snoc` joinEvent)) roomName roomMap
+    case Room.processEvent (Just room) joinEvent of
+      Right r -> do
+        writeTVar roomVar newMap
+        writeTVar playerIdVar (Player.Id.next newId)
+        pure (Right (makeResponse (Player.id <$> players) newId r))
+      Left e ->
+        pure (Left (makeError e))
   where
     makeResponse ::
       Vector Player.Id ->
-      Id ->
+      Player.Id ->
       Room ->
-      API.WithLocation API.RoomResponse
+      (Player.Id, API.RoomResponse)
     makeResponse players assignedId newRoom =
-      addHeader
-        ("room?playerId=" <> toQueryParam assignedId)
-        ( let startGame =
-                if Vector.length players >= 3
-                  then Just (startGameAction assignedId)
-                  else Nothing
-              refresh = refreshAction assignedId
-           in RoomResponse{room = newRoom, assignedId, startGame, refresh}
-        )
+      let startGame =
+            if Vector.length players >= 3
+              then Just (startGameAction assignedId)
+              else Nothing
+          refresh = refreshAction assignedId
+       in (assignedId, RoomResponse{room = newRoom, assignedId, startGame, refresh})
     makeError :: Aeson.ToJSON e => e -> ServerError
     makeError e =
       err400
@@ -124,9 +193,9 @@ join API.JoinRequest{username} = do
               <> Aeson.encode e
         }
 
-roomEndpoint :: Maybe Player.Id -> AppM API.RoomResponse
-roomEndpoint Nothing = throwError err400
-roomEndpoint (Just playerId) = withRoom \room@Room{players} ->
+roomEndpoint :: Text -> Maybe Player.Id -> AppM API.RoomResponse
+roomEndpoint _ Nothing = throwError err400
+roomEndpoint roomName (Just playerId) = withRoom roomName \room@Room{players} ->
   pure
     ( Right
         ( let startGame =
@@ -154,19 +223,19 @@ refreshAction playerId =
   API.Action
     { name = "Check for updates"
     , description = "Check for updates"
-    , url = "room"
+    , url = ""
     , method = API.Get
     , parameters = [("playerId", toQueryParam playerId)]
     , inputs = []
     }
 
-create :: Maybe Player.Id -> AppM (API.WithLocation API.CreateResult)
-create (Just playerId) = do
+create :: Text -> Maybe Player.Id -> AppM (API.WithLocation API.CreateResult)
+create roomName (Just playerId) = do
   roomVar <- asks roomEvents
   gameVar <- asks gameEvents
   gameIdVar <- asks nextGameID
   deck <- liftIO Event.shuffledDeck
-  withRoom \Room{players} ->
+  withRoom roomName \Room{players} ->
     case Player.takeFour players of
       Nothing ->
         pure $
@@ -182,11 +251,13 @@ create (Just playerId) = do
                 { errBody = "Player ID not found."
                 }
         Just playerIndex -> do
-          roomEvents' <- readTVar roomVar
+          roomMap <- readTVar roomVar
           gameMap <- readTVar gameVar
           gameID <- readTVar gameIdVar
           -- append the new room event
-          writeTVar roomVar (Vector.snoc roomEvents' (Room.StartGame gameID))
+          let roomStartEvent = Room.StartGame gameID
+          let newMap = Map.alter (pure . maybe (Vector.singleton roomStartEvent) (`Vector.snoc` roomStartEvent)) roomName roomMap
+          writeTVar roomVar newMap
           -- append the new game events
           let gameStartEvent = Event.StartEvent (Player.id <$> fourPlayers)
           let gameStartEvent' = Event.Start gameStartEvent
@@ -206,16 +277,16 @@ create (Just playerId) = do
             Right $
               addHeader
                 ( "game/" <> toQueryParam gameID
-                    <> "?playerId="
+                    <> "/?playerId="
                     <> toQueryParam playerId
                 )
                 API.CreateResult{..}
-create Nothing = throwError err400{errBody = "You must provide a player ID"}
+create _ Nothing = throwError err400{errBody = "You must provide a player ID"}
 
-gameEndpoint :: Maybe Player.Id -> Game.ID -> AppM API.GameResult
-gameEndpoint (Just playerId) gameID = do
+gameEndpoint :: Text -> Maybe Player.Id -> Game.ID -> AppM API.GameResult
+gameEndpoint roomName (Just playerId) gameID = do
   gameVar <- asks gameEvents
-  withRoom \Room{players} ->
+  withRoom roomName \Room{players} ->
     case Player.takeFour players of
       Nothing ->
         pure $
@@ -252,7 +323,7 @@ gameEndpoint (Just playerId) gameID = do
                           ( API.Action
                               { name = "Play card"
                               , description = "Play card"
-                              , url = "/game/" <> Game.ID.toNumeral gameID <> "/play"
+                              , url = "play"
                               , method = API.Post
                               , parameters = [("playerId", toQueryParam playerId)]
                               , inputs = []
@@ -269,17 +340,22 @@ gameEndpoint (Just playerId) gameID = do
                             , playCard = playAction
                             }
                         )
-gameEndpoint Nothing _ = throwError err400{errBody = "You must provide a player ID"}
+gameEndpoint _ Nothing _ = throwError err400{errBody = "You must provide a player ID"}
 
-withRoom :: (Room -> STM (Either ServerError a)) -> AppM a
-withRoom useRoom = do
+withRoom :: Text -> (Room -> STM (Either ServerError a)) -> AppM a
+withRoom roomName useRoom = do
   roomVar <- asks roomEvents
   result <- liftIO $ atomically do
-    roomEvents' <- readTVar roomVar
+    roomMap <- readTVar roomVar
     Monad.join
       <$> traverse
         useRoom
-        (first roomError (Room.foldEvents Nothing roomEvents'))
+        ( maybe
+            (Left (err400{errBody = "Room not found"}))
+            Right
+            (Map.lookup roomName roomMap >>= Vector.uncons)
+            >>= (first roomError . Room.foldEvents Nothing)
+        )
   either throwError pure result
   where
     roomError :: Aeson.ToJSON e => e -> ServerError
@@ -329,8 +405,7 @@ playEndpoint (Just player) gameID (API.CardSelection card) = do
               pure
                 ( Right
                     ( addHeader
-                        ( "/game/" <> toQueryParam gameID
-                            <> "?playerId="
+                        ( "./?playerId="
                             <> toQueryParam player
                         )
                         (API.PlayResult ())
