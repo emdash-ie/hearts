@@ -329,7 +329,7 @@ instance ToHtml GameResult where
           h2_ (toHtml ("Current trick: " <> statusMessage))
           let f :: Monad m => (Player.Id, Text) -> HtmlT m ()
               f (p, u) =
-                if Just p == fmap ((players ^.) . Player.playerData) playingNext
+                if Just p == fmap (\next -> players ^. Player.playerData next) playingNext
                   then th_ [class_ "next"] (toHtml u)
                   else th_ (toHtml u)
           table_ do
