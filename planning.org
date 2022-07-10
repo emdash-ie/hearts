@@ -1,0 +1,37 @@
+#+TITLE: Planning
+* Goals
+
+High-level goals for the project.
+
+** Hosted and playable on emdash.ie
+
+It’d be nice to be able to show it off!
+
+I think I’ll require room creation to be done first.
+
+** Complete
+
+(Just passing to add, I think)
+
+** Better/nicer UI
+** Other games
+* Next
+
+Things to do/add next, in descending order of priority
+
+** Multiple rooms
+
+At the moment there’s only one room: to allow more than one game at once it should be possible for people to create and join rooms.
+
+** Passing
+
+I think this is the last game rule that’s unimplemented: there’s currently no passing of cards.
+
+** Playing with different numbers of people
+
+The game currently requires four players, but three and five could be supported by removing some cards from the deck.
+
+# Local Variables:
+# org-adapt-indentation: nil
+# org-hide-leading-stars: nil
+# End:
