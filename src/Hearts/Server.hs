@@ -61,6 +61,8 @@ server =
               :<|> create roomName
               :<|> gameEndpoint roomName
               :<|> playEndpoint
+              :<|> eventsEndpoint
+              :<|> eventsHeadEndpoint
          )
 
 heartsAPI :: Proxy HeartsAPI
@@ -436,3 +438,33 @@ withGame gameID useGame = do
             "The game has an inconsistent state: "
               <> Aeson.encode e
         }
+
+eventsEndpoint :: Game.ID -> AppM (Vector Game.Event)
+eventsEndpoint gameID = do
+  gameVar <- asks gameEvents
+  result <- liftIO $ atomically do
+    gameMap <- readTVar gameVar
+    pure
+      ( maybe
+          (Left err500)
+          Right
+          (Map.lookup gameID gameMap)
+      )
+  either throwError pure result
+
+eventsHeadEndpoint :: Game.ID -> AppM (Game.Event)
+eventsHeadEndpoint gameID = do
+  gameVar <- asks gameEvents
+  result <- liftIO $ atomically do
+    gameMap <- readTVar gameVar
+    pure
+      ( maybe
+          (Left err500)
+          Right
+          ( do
+              v <- Map.lookup gameID gameMap
+              (e, _) <- Vector.uncons v
+              pure e
+          )
+      )
+  either throwError pure result

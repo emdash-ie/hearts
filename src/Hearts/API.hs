@@ -113,6 +113,12 @@ type GameAPI =
       :> "play"
       :> ReqBody '[FormUrlEncoded] CardSelection
       :> PostRedirectGet '[JSON, HTML] PlayResult
+    :<|> Capture "gameID" Game.ID
+      :> "events"
+      :> Get '[JSON] (Vector Game.Event)
+    :<|> Capture "gameID" Game.ID
+      :> "lastEvent"
+      :> Get '[JSON] Game.Event
 
 type PostRedirectGet contentTypes a =
   Verb 'POST 303 contentTypes (WithLocation a)
