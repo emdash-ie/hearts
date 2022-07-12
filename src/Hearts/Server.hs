@@ -42,13 +42,13 @@ import qualified Hearts.Player.Id as Player.Id
 import Hearts.Room (Room (Room))
 import qualified Hearts.Room as Room
 
-runServer :: IO ()
-runServer = do
+runServer :: Int -> IO ()
+runServer port = do
   roomVar <- newTVarIO Map.empty
   gameVar <- newTVarIO Map.empty
   gameIdVar <- newTVarIO Game.ID.first
   playerIdVar <- newTVarIO Player.Id.first
-  run 9999 (logStdoutDev (app (ServerState roomVar gameVar gameIdVar playerIdVar)))
+  run port (logStdoutDev (app (ServerState roomVar gameVar gameIdVar playerIdVar)))
 
 server :: ServerT HeartsAPI AppM
 server =

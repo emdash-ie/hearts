@@ -63,4 +63,5 @@ executable hearts-exe
   build-depends:
       base,
       hearts,
+      optparse-applicative,
   default-language: Haskell2010
