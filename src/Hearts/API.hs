@@ -37,39 +37,7 @@ import qualified Data.Text as Text
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Generics (Generic)
-import Lucid (
-  HtmlT,
-  ToHtml (..),
-  a_,
-  action_,
-  class_,
-  fieldset_,
-  for_,
-  form_,
-  h1_,
-  h2_,
-  href_,
-  id_,
-  input_,
-  label_,
-  li_,
-  link_,
-  main_,
-  method_,
-  name_,
-  p_,
-  rel_,
-  required_,
-  table_,
-  tbody_,
-  td_,
-  th_,
-  thead_,
-  tr_,
-  type_,
-  ul_,
-  value_,
- )
+import Lucid
 import Servant hiding (Required)
 import Servant.HTML.Lucid (HTML)
 import Web.FormUrlEncoded (FromForm)
@@ -125,10 +93,19 @@ type PostRedirectGet contentTypes a =
 
 type WithLocation a = Headers '[Header "Location" Text] a
 
-withCSS :: Monad m => Text -> HtmlT m a -> HtmlT m a
-withCSS p h = do
-  link_ [rel_ "stylesheet", href_ (p <> "static/hearts.css"), type_ "text/css"]
-  h
+heartsPage ::
+  Monad m =>
+  Maybe (HtmlT m ()) ->
+  Text ->
+  HtmlT m a ->
+  HtmlT m a
+heartsPage subtitle cssPrefix mainHtml = do
+  html_ do
+    head_ do
+      title_ ("Hearts" <> maybe "" (" - " <>) subtitle)
+      link_ [rel_ "stylesheet", href_ (cssPrefix <> "static/hearts.css"), type_ "text/css"]
+    body_ do
+      main_ mainHtml
 
 data Action = Action
   { name :: Text
@@ -218,7 +195,7 @@ instance Aeson.ToJSON RootResponse
 
 instance ToHtml RootResponse where
   toHtml RootResponse{rooms, createRoom, joinRoom} =
-    withCSS "./" $ main_ do
+    heartsPage Nothing "./" $ do
       p_ "Welcome to the Hearts server!"
       p_ "You can join one of the following rooms to play:"
       ul_ do
@@ -254,7 +231,7 @@ instance Aeson.ToJSON RoomResponse
 
 instance ToHtml RoomResponse where
   toHtml RoomResponse{room = Room{players, games}, assignedId, startGame, refresh} =
-    withCSS "../../" $ main_ do
+    heartsPage (Just "Room") "../../" do
       p_ ("Your assigned ID is: " <> toHtml (show assignedId))
       p_ ("The players in this room are: " <> toHtml (show players))
       unless (Vector.null games) do
@@ -287,7 +264,7 @@ instance ToHtml CreateResult where
       { gameID
       , startEvent = StartEvent{players}
       , dealEvent = DealEvent{hand}
-      } = withCSS "./" $ main_ do
+      } = heartsPage (Just "Room created") "./" do
       p_ ("Created a game with ID: " <> toHtml (show gameID))
       p_ ("The players in this game are: " <> toHtml (show players))
       p_ ("Your hand is: " <> toHtml (show hand))
@@ -314,7 +291,7 @@ instance ToHtml GameResult where
       , playingNext
       , you
       , playCard
-      } = withCSS "../../../../" $ main_ do
+      } = heartsPage (Just "Game") "../../../../" do
       h1_ "Hearts"
       let username = Player.getPlayerData you usernames
       p_ ("Welcome to game " <> toHtml (Game.ID.toNumeral gameID) <> ", " <> toHtml username <> "!")
