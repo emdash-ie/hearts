@@ -11,6 +11,9 @@ extra-source-files:
     README.md
     ChangeLog.md
 
+data-files:
+    static/hearts.css
+
 library
   exposed-modules:
       Hearts.Game
@@ -61,7 +64,8 @@ executable hearts-exe
   ghc-options: -Wall -Werror
                -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base,
       hearts,
+      base,
+      filepath,
       optparse-applicative,
   default-language: Haskell2010

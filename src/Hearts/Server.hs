@@ -13,7 +13,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (first)
-import Data.Foldable (toList)
+import Data.Foldable (toList, traverse_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Monoid (Sum (Sum))
@@ -42,18 +42,24 @@ import qualified Hearts.Player.Id as Player.Id
 import Hearts.Room (Room (Room))
 import qualified Hearts.Room as Room
 
-runServer :: Int -> IO ()
-runServer port = do
+runServer :: String -> Int -> IO ()
+runServer staticPath port = do
+  traverse_
+    putStrLn
+    [ "Starting hearts server"
+    , "- static path: " <> staticPath
+    , "- port: " <> show port
+    ]
   roomVar <- newTVarIO Map.empty
   gameVar <- newTVarIO Map.empty
   gameIdVar <- newTVarIO Game.ID.first
   playerIdVar <- newTVarIO Player.Id.first
-  run port (logStdoutDev (app (ServerState roomVar gameVar gameIdVar playerIdVar)))
+  run port (logStdoutDev (app (ServerState roomVar gameVar gameIdVar playerIdVar staticPath)))
 
-server :: ServerT HeartsAPI AppM
-server =
+server :: String -> ServerT HeartsAPI AppM
+server staticPath =
   root
-    :<|> serveDirectoryWebApp "static"
+    :<|> serveDirectoryWebApp staticPath
     :<|> createRoom
     :<|> ( \roomName ->
             roomEndpoint roomName
@@ -69,7 +75,7 @@ heartsAPI :: Proxy HeartsAPI
 heartsAPI = Proxy
 
 app :: ServerState -> Application
-app s = serve heartsAPI (hoistServer heartsAPI (nt s) server)
+app s@ServerState{staticPath} = serve heartsAPI (hoistServer heartsAPI (nt s) (server staticPath))
 
 nt :: ServerState -> AppM a -> Handler a
 nt s x = runReaderT x s
@@ -81,6 +87,7 @@ data ServerState = ServerState
   , gameEvents :: TVar (Map Game.ID (Vector Game.Event))
   , nextGameID :: TVar Game.ID
   , nextPlayerID :: TVar Player.Id
+  , staticPath :: String
   }
 
 root :: AppM API.RootResponse

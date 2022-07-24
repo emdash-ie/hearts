@@ -3,16 +3,17 @@
 module Main where
 
 import Options.Applicative
+import System.FilePath ((</>))
 
 import Data.Version (showVersion)
 import qualified Hearts.Server as Server
-import Paths_hearts (version)
+import Paths_hearts (getDataDir, version)
 
 main :: IO ()
 main = do
   Options{port} <- execParser opts
-  putStrLn ("Hearts server starting on port " <> show port)
-  Server.runServer port
+  staticDir <- fmap (</> "static") getDataDir
+  Server.runServer staticDir port
   where
     opts =
       info
