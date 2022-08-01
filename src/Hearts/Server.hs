@@ -1,5 +1,6 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -8,15 +9,21 @@
 
 module Hearts.Server (runServer) where
 
+import Control.Category ((>>>))
 import qualified Control.Monad as Monad
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (first)
+import qualified Data.ByteString.Lazy as ByteString
 import Data.Foldable (toList, traverse_)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (catMaybes)
 import Data.Monoid (Sum (Sum))
+import Data.Text (Text)
+import Data.Text.Lazy (fromStrict)
+import Data.Text.Lazy.Encoding (encodeUtf8)
 import Data.Vector (Vector)
 import qualified Data.Vector as Vector
 import GHC.Conc (STM, TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
@@ -24,11 +31,6 @@ import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
-import Control.Category ((>>>))
-import Data.Maybe (catMaybes)
-import Data.Text (Text)
-import Data.Text.Lazy (fromStrict)
-import Data.Text.Lazy.Encoding (encodeUtf8)
 import Hearts.API (HeartsAPI, RoomResponse (..))
 import qualified Hearts.API as API
 import Hearts.Game (Game (Game))
@@ -62,12 +64,14 @@ server staticPath =
     :<|> serveDirectoryWebApp staticPath
     :<|> createRoom
     :<|> ( \roomName ->
-            roomEndpoint roomName
+            getRoomEvents roomName
+              :<|> roomEndpoint roomName
               :<|> join roomName
               :<|> create roomName
               :<|> gameEndpoint roomName
               :<|> playEndpoint
               :<|> eventsEndpoint
+              :<|> eventsPlusEndpoint roomName
               :<|> eventsHeadEndpoint
          )
 
@@ -156,6 +160,14 @@ createRoom joinRequest@API.JoinRequest{roomName} = do
           roomResponse
   where
     roomExistsError = err400{errBody = "Error: Room " <> encodeUtf8 (fromStrict roomName) <> " already exists!"}
+
+getRoomEvents :: Text -> AppM (Vector Room.Event)
+getRoomEvents roomName = do
+  roomVar <- asks roomEvents
+  roomMap <- liftIO (readTVarIO roomVar)
+  case Map.lookup roomName roomMap of
+    Nothing -> throwError err404{errBody = "Room name not recognised"}
+    Just es -> pure es
 
 join :: Text -> API.JoinRequest -> AppM (API.WithLocation API.RoomResponse)
 join roomName joinRequest = do
@@ -458,6 +470,18 @@ eventsEndpoint gameID = do
           (Map.lookup gameID gameMap)
       )
   either throwError pure result
+
+eventsPlusEndpoint :: Text -> Game.ID -> AppM (Vector Game.Event)
+eventsPlusEndpoint roomName gameID = do
+  gameVar <- asks gameEvents
+  withRoom roomName \Room{} -> do
+    gameMap <- readTVar gameVar
+    pure
+      ( maybe
+          (Left err500)
+          Right
+          (Map.lookup gameID gameMap)
+      )
 
 eventsHeadEndpoint :: Game.ID -> AppM (Game.Event)
 eventsHeadEndpoint gameID = do

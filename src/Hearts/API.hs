@@ -62,12 +62,15 @@ type RoomAPI =
   ReqBody '[JSON, FormUrlEncoded] JoinRequest
     :> PostRedirectGet '[JSON, HTML] RoomResponse
     :<|> Capture "roomName" Text
-      :> ( QueryParam "playerId" Player.Id
-            :> Get '[JSON, HTML] RoomResponse
-            :<|> "join"
-              :> ReqBody '[JSON, FormUrlEncoded] JoinRequest
-              :> PostRedirectGet '[JSON, HTML] RoomResponse
-            :<|> "game" :> GameAPI
+      :> ( "events"
+            :> Get '[JSON] (Vector Room.Event)
+            :<|> ( QueryParam "playerId" Player.Id
+                    :> Get '[JSON, HTML] RoomResponse
+                    :<|> "join"
+                      :> ReqBody '[JSON, FormUrlEncoded] JoinRequest
+                      :> PostRedirectGet '[JSON, HTML] RoomResponse
+                    :<|> "game" :> GameAPI
+                 )
          )
 
 type GameAPI =
@@ -83,6 +86,9 @@ type GameAPI =
       :> PostRedirectGet '[JSON, HTML] PlayResult
     :<|> Capture "gameID" Game.ID
       :> "events"
+      :> Get '[JSON] (Vector Game.Event)
+    :<|> Capture "gameID" Game.ID
+      :> "eventsPlus"
       :> Get '[JSON] (Vector Game.Event)
     :<|> Capture "gameID" Game.ID
       :> "lastEvent"

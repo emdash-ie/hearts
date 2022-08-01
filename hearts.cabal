@@ -33,6 +33,7 @@ library
   build-depends:
       aeson,
       base,
+      bytestring,
       containers,
       generic-lens,
       http-api-data,
