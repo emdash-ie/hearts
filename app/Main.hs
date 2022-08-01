@@ -11,9 +11,9 @@ import Paths_hearts (getDataDir, version)
 
 main :: IO ()
 main = do
-  Options{port} <- execParser opts
+  Options{port, stateFile} <- execParser opts
   staticDir <- fmap (</> "static") getDataDir
-  Server.runServer staticDir port
+  Server.runServer staticDir port stateFile
   where
     opts =
       info
@@ -25,6 +25,7 @@ main = do
 
 data Options = Options
   { port :: Int
+  , stateFile :: Maybe FilePath
   }
 
 options :: Parser Options
@@ -37,4 +38,11 @@ options =
           <> showDefault
           <> value 9999
           <> metavar "N"
+      )
+    <*> option
+      (Just <$> str)
+      ( long "stateFile"
+          <> help "State file to load at startup"
+          <> value Nothing
+          <> metavar "/path/to/state.json"
       )

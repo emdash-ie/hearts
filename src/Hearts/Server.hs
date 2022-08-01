@@ -13,6 +13,7 @@ import Control.Category ((>>>))
 import qualified Control.Monad as Monad
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Reader (ReaderT, asks, runReaderT)
+import Data.Aeson (FromJSON)
 import qualified Data.Aeson as Aeson
 import Data.Bifunctor (first)
 import qualified Data.ByteString.Lazy as ByteString
@@ -44,24 +45,64 @@ import qualified Hearts.Player.Id as Player.Id
 import Hearts.Room (Room (Room))
 import qualified Hearts.Room as Room
 
-runServer :: String -> Int -> IO ()
-runServer staticPath port = do
+runServer :: FilePath -> Int -> Maybe FilePath -> IO ()
+runServer staticPath port stateFile = do
+  state@ServerState{staticPath = staticPath'} <- case stateFile of
+    Nothing -> do
+      roomEvents' <- newTVarIO Map.empty
+      gameEvents' <- newTVarIO Map.empty
+      nextGameID' <- newTVarIO Game.ID.first
+      nextPlayerID' <- newTVarIO Player.Id.first
+      return
+        ServerState
+          { roomEvents = roomEvents'
+          , gameEvents = gameEvents'
+          , nextGameID = nextGameID'
+          , nextPlayerID = nextPlayerID'
+          , staticPath
+          }
+    Just p -> do
+      s <- readStateFile p
+      case s of
+        Left e -> error ("Error reading state file: " <> e)
+        Right
+          API.ServerState
+            { roomEvents
+            , gameEvents
+            , nextGameID
+            , nextPlayerID
+            , staticPath = staticPath'
+            } -> do
+            roomEvents' <- newTVarIO roomEvents
+            gameEvents' <- newTVarIO gameEvents
+            nextGameID' <- newTVarIO nextGameID
+            nextPlayerID' <- newTVarIO nextPlayerID
+            return
+              ServerState
+                { roomEvents = roomEvents'
+                , gameEvents = gameEvents'
+                , nextGameID = nextGameID'
+                , nextPlayerID = nextPlayerID'
+                , staticPath = staticPath'
+                }
   traverse_
     putStrLn
-    [ "Starting hearts server"
-    , "- static path: " <> staticPath
-    , "- port: " <> show port
-    ]
-  roomVar <- newTVarIO Map.empty
-  gameVar <- newTVarIO Map.empty
-  gameIdVar <- newTVarIO Game.ID.first
-  playerIdVar <- newTVarIO Player.Id.first
-  run port (logStdoutDev (app (ServerState roomVar gameVar gameIdVar playerIdVar staticPath)))
+    ( [ "Starting hearts server"
+      , "- static path: " <> staticPath'
+      , "- port: " <> show port
+      ]
+        <> [maybe "" ("- state file: " <>) stateFile]
+    )
+  run port (logStdoutDev (app state))
+
+readStateFile :: FromJSON a => FilePath -> IO (Either String a)
+readStateFile = fmap Aeson.eitherDecode . ByteString.readFile
 
 server :: String -> ServerT HeartsAPI AppM
 server staticPath =
   root
     :<|> serveDirectoryWebApp staticPath
+    :<|> serverState
     :<|> createRoom
     :<|> ( \roomName ->
             getRoomEvents roomName
@@ -138,6 +179,22 @@ root = do
             , API.HiddenInput "roomName" name True
             ]
         }
+
+serverState :: AppM API.ServerState
+serverState = do
+  roomEvents' <- asks roomEvents >>= (liftIO . readTVarIO)
+  gameEvents' <- asks gameEvents >>= (liftIO . readTVarIO)
+  nextGameID' <- asks nextGameID >>= (liftIO . readTVarIO)
+  nextPlayerID' <- asks nextPlayerID >>= (liftIO . readTVarIO)
+  staticPath' <- asks staticPath
+  return
+    API.ServerState
+      { roomEvents = roomEvents'
+      , gameEvents = gameEvents'
+      , nextGameID = nextGameID'
+      , nextPlayerID = nextPlayerID'
+      , staticPath = staticPath'
+      }
 
 createRoom :: API.JoinRequest -> AppM (API.WithLocation API.RoomResponse)
 createRoom joinRequest@API.JoinRequest{roomName} = do

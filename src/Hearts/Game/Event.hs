@@ -32,6 +32,7 @@ data Event
   deriving (Show, Generic)
 
 instance Aeson.ToJSON Event
+instance Aeson.FromJSON Event
 
 newtype StartEvent = -- | Start a game with these players.
   --
@@ -40,23 +41,27 @@ newtype StartEvent = -- | Start a game with these players.
   deriving (Show, Generic)
 
 instance Aeson.ToJSON StartEvent
+instance Aeson.FromJSON StartEvent
 
 newtype DealEvent = -- | Deal a new hand with this deck.
   DealEvent {deck :: Deck}
   deriving (Show, Generic)
 
 instance Aeson.ToJSON DealEvent
+instance Aeson.FromJSON DealEvent
 
 newtype PlayEvent = -- | Play this card next in the current trick.
   PlayEvent {card :: Card}
   deriving (Show, Generic)
 
 instance Aeson.ToJSON PlayEvent
+instance Aeson.FromJSON PlayEvent
 
 newtype Deck = Deck (Vector Card)
   deriving (Show, Generic)
 
 instance Aeson.ToJSON Deck
+instance Aeson.FromJSON Deck
 
 shuffledDeck :: IO Deck
 shuffledDeck = Deck . Vector.fromList <$> shuffleM Card.allCards

@@ -83,6 +83,7 @@ instance Show Card where
     Card Hearts Ace -> "🂱"
 
 instance Aeson.ToJSON Card
+instance Aeson.FromJSON Card
 
 instance ToHtml Card where
   toHtml c@(Card s _) =
@@ -166,6 +167,7 @@ instance Show Suit where
     Hearts -> "♥"
 
 instance Aeson.ToJSON Suit
+instance Aeson.FromJSON Suit
 
 data Value
   = Two
@@ -200,6 +202,7 @@ instance Show Value where
     Ace -> "A"
 
 instance Aeson.ToJSON Value
+instance Aeson.FromJSON Value
 
 -- | The score taken for taking this card in a trick.
 score :: Card -> Sum Integer

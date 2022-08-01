@@ -165,6 +165,7 @@ instance Applicative FourPlayers where
         }
 
 instance Aeson.ToJSON a => Aeson.ToJSON (FourPlayers a)
+instance Aeson.FromJSON a => Aeson.FromJSON (FourPlayers a)
 
 data ThreePlayers a = ThreePlayers
   { one :: a

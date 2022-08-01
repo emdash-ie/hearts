@@ -41,9 +41,13 @@ data Event
   | Join Player.Id Username
   | Leave Player.Id
   | StartGame Game.ID
+  deriving (Generic)
 
 type Username = Text
 type RoomName = Text
+
+instance Aeson.ToJSON Event
+instance Aeson.FromJSON Event
 
 foldEvents ::
   Foldable f =>

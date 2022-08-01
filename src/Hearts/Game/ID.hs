@@ -15,6 +15,8 @@ newtype ID = ID Integer
 
 instance Aeson.ToJSON ID
 instance Aeson.FromJSON ID
+instance Aeson.FromJSONKey ID
+instance Aeson.ToJSONKey ID
 
 instance ToHttpApiData ID where
   toQueryParam (ID n) = Text.pack (show n)

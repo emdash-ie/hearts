@@ -21,6 +21,7 @@ module Hearts.API (
   Method (..),
   Input (..),
   WithLocation,
+  ServerState (..),
 ) where
 
 import Control.Lens (Identity (runIdentity), (%~), (^.))
@@ -56,7 +57,20 @@ import qualified Hearts.Room as Room
 type HeartsAPI =
   Get '[JSON, HTML] RootResponse
     :<|> "static" :> Raw
+    :<|> "state" :> Get '[JSON] ServerState
     :<|> "room" :> RoomAPI
+
+data ServerState = ServerState
+  { roomEvents :: Map Text (Vector Room.Event)
+  , gameEvents :: Map Game.ID (Vector Game.Event)
+  , nextGameID :: Game.ID
+  , nextPlayerID :: Player.Id
+  , staticPath :: String
+  }
+  deriving (Generic)
+
+instance Aeson.ToJSON ServerState
+instance Aeson.FromJSON ServerState
 
 type RoomAPI =
   ReqBody '[JSON, FormUrlEncoded] JoinRequest
