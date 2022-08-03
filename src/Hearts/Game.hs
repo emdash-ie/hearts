@@ -191,7 +191,7 @@ processEvent (Just game) (Play playEvent@PlayEvent{card}) =
               g
                 ^. field @"tricks"
                   . to (fmap (foldMap scoreTrick))
-            let scores = case Player.findIndex (== 26) scores of
+            let scores = case Player.findIndex (== 26) initialScores of
                   Nothing -> initialScores
                   Just i -> set (playerData i) 26 (pure 0)
             let newGame = over (field @"scores") (scores <>) g
