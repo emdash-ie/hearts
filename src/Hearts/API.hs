@@ -252,6 +252,9 @@ instance Aeson.ToJSON RoomResponse
 instance ToHtml RoomResponse where
   toHtml RoomResponse{room = Room{players, games}, assignedId, startGame, refresh} =
     heartsPage (Just "Room") "../../" do
+      let you = fromMaybe (error "uh oh") (Vector.find ((== assignedId) . Player.id) players)
+      let username = Player.username you
+      p_ ("Hello, " <> toHtml username <> "!")
       p_ ("Your assigned ID is: " <> toHtml (show assignedId))
       p_ ("The players in this room are: " <> toHtml (show players))
       unless (Vector.null games) do
