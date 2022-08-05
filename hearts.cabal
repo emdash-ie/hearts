@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               hearts
-version:            1.0.2-wip
+version:            1.0.2
 synopsis:           An implementation of the card game Hearts
 license:            GPL-3.0-or-later
 author:             Emily Bourke
