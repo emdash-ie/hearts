@@ -1,11 +1,11 @@
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Hearts.Server (runServer) where
 
@@ -32,6 +32,8 @@ import Network.Wai.Handler.Warp (run)
 import Network.Wai.Middleware.RequestLogger (logStdoutDev)
 import Servant
 
+import Control.Lens
+import Data.Generics.Product (field)
 import Hearts.API (HeartsAPI, RoomResponse (..))
 import qualified Hearts.API as API
 import Hearts.Game (Game (Game))
@@ -413,7 +415,7 @@ gameEndpoint roomName (Just playerId) gameID = do
                             { gameID
                             , usernames = Player.username <$> fourPlayers
                             , game = Game.toPlayerGame playerIndex game
-                            , playingNext = Game.playingNext game
+                            , playingNext = game ^. field @"currentRound" >>= Game.playingNext
                             , you = playerIndex
                             , playCard = playAction
                             }
@@ -452,7 +454,7 @@ playEndpoint ::
 playEndpoint (Just player) gameID (API.CardSelection card) = do
   gameVar <- asks gameEvents
   deck <- liftIO Event.shuffledDeck
-  withGame gameID \game@Game{hands} ->
+  withGame gameID \game@Game{currentRound} ->
     if Game.playingNext' game /= Just player
       then
         pure
@@ -466,10 +468,11 @@ playEndpoint (Just player) gameID (API.CardSelection card) = do
               )
           )
       else do
+        let hands = maybe [] toList (currentRound >>= (^. field @"hands"))
         let newEvents =
               Vector.cons
                 (Event.Play (Event.PlayEvent card))
-                ( if foldMap (Sum . Vector.length) (maybe [] toList hands) == Sum 1
+                ( if foldMap (Sum . Vector.length) hands == Sum 1
                     then Vector.singleton (Event.Deal (Event.DealEvent deck))
                     else Vector.empty
                 )
@@ -540,7 +543,7 @@ eventsPlusEndpoint roomName gameID = do
           (Map.lookup gameID gameMap)
       )
 
-eventsHeadEndpoint :: Game.ID -> AppM (Game.Event)
+eventsHeadEndpoint :: Game.ID -> AppM Game.Event
 eventsHeadEndpoint gameID = do
   gameVar <- asks gameEvents
   result <- liftIO $ atomically do

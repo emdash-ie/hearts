@@ -26,6 +26,8 @@ module Hearts.Player (
   setPlayerData,
   playerData,
   playOrder,
+  RoundInProgress (..),
+  Round (..),
 ) where
 
 import Control.Lens (Lens', lens)
@@ -44,10 +46,8 @@ import Hearts.Player.Id
 data Game = Game
   { players :: FourPlayers Id
   , scores :: FourPlayers (Sum Integer)
-  , hand :: Maybe (Vector Card)
-  , trick :: Maybe (Trick Maybe)
-  , lastTrick :: Maybe (Trick Identity)
-  , heartsBroken :: Bool
+  , currentRound :: Maybe RoundInProgress
+  , pastRounds :: Vector Round
   , finished :: Bool
   }
   deriving (Show, Eq, Generic)
@@ -57,11 +57,32 @@ instance Aeson.ToJSON Game where
     Aeson.object
       [ "players" .= players
       , "scores" .= fmap getSum scores
-      , "hand" .= hand
-      , "trick" .= trick
-      , "lastTrick" .= lastTrick
-      , "heartsBroken" .= heartsBroken
+      , "currentRound" .= currentRound
+      , "pastRounds" .= pastRounds
       , "finished" .= finished
+      ]
+
+data RoundInProgress = RoundInProgress
+  { hand :: Maybe (Vector Card)
+  , trick :: Maybe (Trick Maybe)
+  , lastTrick :: Maybe (Trick Identity)
+  , heartsBroken :: Bool
+  }
+  deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON RoundInProgress
+
+data Round = Round
+  { tricks :: Vector (Trick Identity)
+  , scores :: FourPlayers (Sum Integer)
+  }
+  deriving (Show, Eq, Generic)
+
+instance Aeson.ToJSON Round where
+  toJSON Round{..} =
+    Aeson.object
+      [ "tricks" .= tricks
+      , "scores" .= fmap getSum scores
       ]
 
 type Trick m =

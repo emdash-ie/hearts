@@ -310,7 +310,7 @@ instance ToHtml GameResult where
     GameResult
       { gameID
       , usernames
-      , game = Player.Game{players, hand, scores, trick, lastTrick, finished}
+      , game = Player.Game{players, scores, currentRound, finished}
       , playingNext
       , you
       , playCard
@@ -322,6 +322,9 @@ instance ToHtml GameResult where
         p_ "This game is over!"
       h2_ "Scores:"
       toHtml (ScoreTable (you, (,) <$> usernames <*> scores))
+      let trick = currentRound >>= (^. field @"trick")
+      let lastTrick = currentRound >>= (^. field @"lastTrick")
+      let hand = currentRound >>= (^. field @"hand")
       case trick of
         Nothing -> mempty
         Just (_, cards) -> do
