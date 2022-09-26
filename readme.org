@@ -1,0 +1,31 @@
+#+title: Hearts
+
+A server for playing games of [[https://en.wikipedia.org/wiki/Hearts_(card_game)][Hearts]], which allows multiplayer play over the web. It is in fairly early stages, and there is no hosted instance of the server available.
+
+* Building / running
+
+I typically build this using [[https://en.wikipedia.org/wiki/Nix_(package_manager)][nix]] and/or [[https://en.wikipedia.org/wiki/Cabal_(software)][cabal]].
+
+I first run ~cabal2nix~ to generate a nix file from the project’s cabal file:
+
+#+begin_src fish
+  cabal2nix . > hearts.nix
+#+end_src
+
+What I do next depends on whether I’m building the program during development, or for deployment.
+
+If during development, I enter a nix shell and use the ~cabal~ that that provides to run the program:
+
+#+begin_src fish
+  nix-shell
+
+  [nix-shell]$ cabal run hearts-exe
+#+end_src
+
+If deploying, I use ~nix-build~:
+
+#+begin_src fish
+  nix-build release.nix
+#+end_src
+
+This command eventually prints out the path to the resulting binary, which I can invoke directly.
